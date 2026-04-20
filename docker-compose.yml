@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  # Base de données PostgreSQL
+  db:
+    image: postgres:15-alpine
+    container_name: horizons_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # Backend FastAPI
+  backend:
+    build:
+      context: .
+      dockerfile: ./horizons_back/Dockerfile
+    container_name: horizons_backend
+    restart: always
+    environment:
+      # L'URL est construite dynamiquement avec tes variables cachées !
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+    depends_on:
+      - db
+    ports:
+      - "8000:8000"
+
+  # Frontend Vue 3
+  frontend:
+    build:
+      context: ./horizons_front
+      dockerfile: Dockerfile
+    container_name: horizons_frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:

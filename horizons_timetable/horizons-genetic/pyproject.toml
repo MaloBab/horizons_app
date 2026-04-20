@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "horizons-genetic"
+version = "0.1.0"
+description = "Algorithme génétique d'affectation des bénévoles Horizons"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "horizons-core>=0.1.0",
+    "openpyxl>=3.0.0",
+    "odfpy>=1.4.1",
+]
+# NB : pas de dépendance sur parsing-benevole ni parsing-poste.
+# Ce package reçoit des list[Poste] et list[Benevole] déjà construits —
+# le parsing est la responsabilité de l'orchestrateur (main.py).
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "mypy>=1.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/horizons_genetic"]
+
+# ---------------------------------------------------------------------------
+# Structure attendue :
+#
+# horizons-genetic/
+# ├── pyproject.toml
+# └── src/horizons_genetic/
+#     ├── __init__.py
+#     ├── engine.py                ← PYTHON/genetic/engine.py
+#     ├── core/
+#     │   ├── chromosome.py
+#     │   └── population.py
+#     ├── fitness/
+#     │   ├── incremental_fitness_calculator.py
+#     │   └── max_fitness.py
+#     ├── operators/
+#     │   ├── initializer.py
+#     │   ├── crossover/  (AdaptativeCrossover, greedyCrossover, etc.)
+#     │   └── mutation/   (adaptativeMutation, Imutation)
+#     ├── repair/
+#     │   ├── constraint_validator.py
+#     │   └── solution_repairer.py
+#     ├── settings/
+#     │   ├── config.py
+#     │   └── fitness_weights.py
+#     ├── utils/
+#     │   ├── chromosome_converter.py
+#     │   └── index_manager.py
+#     └── output/
+#         └── ods_exporter.py      ← PYTHON/output/ods_exporter.py
+# ---------------------------------------------------------------------------

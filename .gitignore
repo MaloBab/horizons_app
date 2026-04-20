@@ -1,0 +1,74 @@
+# =========================
+# 1. ENVIRONNEMENT & SECRETS
+# =========================
+.env
+.env.local
+.env.*.local
+credentials.json
+*.db
+*.sqlite
+*.sqlite3
+
+# =========================
+# 2. PYTHON (Backend & Modules)
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.tox/
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+build/
+dist/
+*.egg-info/
+# (Optionnel) Ton script perso que tu avais mis :
+scripts/extract_names_compagnons.py
+
+# =========================
+# 3. NODE & VUE 3 (Frontend)
+# =========================
+node_modules/
+.pnpm-store/
+dist/
+dist-ssr/
+coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# =========================
+# 4. LOGS & FICHIERS TEMPORAIRES
+# =========================
+*.log
+logs/
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+*.ods#
+
+# =========================
+# 5. IDE & SYSTÈMES D'EXPLOITATION
+# =========================
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# =========================
+# 6. DONNÉES PERSONNELLES
+# =========================
+# Si tu veux ignorer tous les tableurs de ton projet, décommente la ligne ci-dessous :
+# *.ods
+# Mais il vaut mieux juste ignorer un dossier spécifique qui contient tes données :
+*.ods

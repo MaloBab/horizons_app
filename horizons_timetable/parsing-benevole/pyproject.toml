@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "parsing-benevole"
+version = "0.1.0"
+description = "Parseur ODS pour les inscriptions bénévoles Horizons"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "horizons-core>=0.1.0",
+    "odfpy>=1.4.1",
+    "python-dateutil>=2.8.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "mypy>=1.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/parsing_benevole"]
+
+# ---------------------------------------------------------------------------
+# Structure attendue :
+#
+# parsing-benevole/
+# ├── pyproject.toml
+# └── src/parsing_benevole/
+#     ├── __init__.py
+#     ├── parseur_benevole.py      ← PYTHON/parsing/parseur_benevole.py
+#     ├── dataclass/
+#     │   ├── compagnon_data.py    ← PYTHON/parsing/dataclass/compagnon_data.py
+#     │   └── parse_result.py     ← PYTHON/parsing/dataclass/parse_result.py
+#     ├── interfaces/
+#     │   └── interfaces.py       ← PYTHON/parsing/interfaces/interfaces.py
+#     ├── ods/                    ← PYTHON/parsing/ods/  (partagé — voir note)
+#     │   ├── cell_span_detector.py
+#     │   ├── column_indexer.py
+#     │   ├── isheet_reader.py
+#     │   ├── sheet_navigator.py
+#     │   └── sheet_reader.py
+#     ├── settings/
+#     │   ├── constants.py        ← PYTHON/parsing/settings/constants.py
+#     │   └── schema_configuration.py
+#     └── tools/benevole/
+#         ├── column_helper.py
+#         ├── compagnon_matcher.py
+#         ├── disponibilite_generator.py
+#         └── preference_extractor.py
+#
+# NOTE : parsing/ods/ est utilisé par les deux parseurs.
+# Option A (simple) : dupliquer dans chaque package.
+# Option B (propre) : extraire dans horizons-core ou un package horizons-ods dédié.
+# ---------------------------------------------------------------------------

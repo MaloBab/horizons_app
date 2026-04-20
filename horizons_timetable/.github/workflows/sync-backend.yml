@@ -1,0 +1,60 @@
+name: Sync backend requirements
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v-core-*'
+      - 'v-parsing-*'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout backend repo
+        uses: actions/checkout@v4
+        with:
+          repository: MaloBab/Horizons_back
+          token: ${{ secrets.PAT_BACKEND }}
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Read latest versions
+        id: versions
+        run: |
+          CORE_VERSION=$(python -c "
+          import re, pathlib
+          content = pathlib.Path('horizons-core/pyproject.toml').read_text()
+          print(re.search(r'version = \"(.+?)\"', content).group(1))
+          ")
+          PARSING_VERSION=$(python -c "
+          import re, pathlib
+          content = pathlib.Path('parsing-poste/pyproject.toml').read_text()
+          print(re.search(r'version = \"(.+?)\"', content).group(1))
+          ")
+          echo "core=$CORE_VERSION"     >> $GITHUB_OUTPUT
+          echo "parsing=$PARSING_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Update requirements.txt
+        env:
+          GITHUB_REPO: ${{ github.repository }}
+          CORE_VERSION: ${{ steps.versions.outputs.core }}
+          PARSING_VERSION: ${{ steps.versions.outputs.parsing }}
+        run: python scripts/update_requirements.py
+
+      - name: Commit if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git diff --quiet backend/requirements.txt || (
+            git add backend/requirements.txt &&
+            git commit -m "chore(backend): sync deps core@${{ steps.versions.outputs.core }} parsing@${{ steps.versions.outputs.parsing }} [skip ci]" &&
+            git push
+          )

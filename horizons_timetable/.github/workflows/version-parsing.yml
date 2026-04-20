@@ -1,0 +1,44 @@
+name: Bump & Tag parsing-poste
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'parsing-poste/**'   # déclenché uniquement si parsing-poste est modifié
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Bump patch version
+        id: bump
+        run: |
+          NEW_VERSION=$(python scripts/bump_version.py parsing-poste/pyproject.toml)
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Commit & push version bump
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add parsing-poste/pyproject.toml
+          git commit -m "chore(parsing-poste): bump to v${{ steps.bump.outputs.version }} [skip ci]"
+          git push
+
+      - name: Create git tag
+        run: |
+          git tag "v-parsing-${{ steps.bump.outputs.version }}"
+          git push origin "v-parsing-${{ steps.bump.outputs.version }}"

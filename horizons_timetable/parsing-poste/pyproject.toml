@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "parsing-poste"
+version = "0.1.4"
+description = "Parseur ODS pour les besoins en postes bénévoles Horizons"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "horizons-core>=0.1.0",
+    "odfpy>=1.4.1",
+    "python-dateutil>=2.8.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "mypy>=1.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/parsing_poste"]
+
+# ---------------------------------------------------------------------------
+# Structure attendue :
+#
+# parsing-poste/
+# ├── pyproject.toml
+# └── src/parsing_poste/
+#     ├── __init__.py
+#     ├── parseur_poste.py         ← PYTHON/parsing/parseur_poste.py
+#     ├── parseur_report.py        ← PYTHON/parsing/parseur_report.py
+#     ├── dataclass/
+#     │   └── parse_result.py     ← PYTHON/parsing/dataclass/parse_result.py
+#     ├── interfaces/
+#     │   └── interfaces.py       ← PYTHON/parsing/interfaces/interfaces.py
+#     ├── ods/                    ← PYTHON/parsing/ods/  (voir note dans parsing-benevole)
+#     │   ├── cell_span_detector.py
+#     │   ├── column_indexer.py
+#     │   ├── isheet_reader.py
+#     │   ├── sheet_navigator.py
+#     │   └── sheet_reader.py
+#     ├── settings/
+#     │   ├── constants.py
+#     │   └── poste_config.py     ← PYTHON/parsing/settings/poste_config.py
+#     └── tools/poste/
+#         ├── categorie_tracker.py
+#         ├── creneau_parseur.py
+#         ├── jour_detector.py
+#         └── poste_validator.py
+# ---------------------------------------------------------------------------

@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "horizons-core"
+version = "0.1.12"
+description = "Modèles de données partagés pour HorizonsTimetable"
+readme = "README.md"
+requires-python = ">=3.11"
+# Aucune dépendance externe — ce package est la base de tout
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "mypy>=1.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/horizons_core"]
+
+# ---------------------------------------------------------------------------
+# Structure attendue :
+#
+# horizons-core/
+# ├── pyproject.toml
+# └── src/horizons_core/
+#     ├── __init__.py
+#     ├── dataclass/
+#     │   ├── __init__.py
+#     │   ├── benevole.py          ← PYTHON/dataclass/Benevole.py
+#     │   ├── poste.py             ← PYTHON/dataclass/Poste.py
+#     │   └── creneau.py          ← PYTHON/dataclass/Creneau.py
+#     ├── exceptions/
+#     │   ├── __init__.py
+#     │   ├── enums.py             ← PYTHON/exceptions/enums.py
+#     │   ├── invalid_timeslot_exception.py
+#     │   └── parse_exception.py
+#     └── utils/
+#         ├── __init__.py
+#         ├── date_utils.py        ← PYTHON/utils/date_utils.py
+#         ├── enums.py             ← PYTHON/utils/enums.py
+#         ├── mapping_utils.py
+#         └── text_utils.py
+# ---------------------------------------------------------------------------

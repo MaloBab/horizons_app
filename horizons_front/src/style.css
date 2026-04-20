@@ -1,0 +1,303 @@
+@import "tailwindcss";
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Tokens Tailwind v4 — @theme est supporté nativement avec @tailwindcss/vite.
+   Si VS Code souligne @theme en rouge, c'est l'extension CSS IntelliSense
+   qui est en retard — le build fonctionne correctement.
+   Fix : .vscode/settings.json → "css.lint.unknownAtRules": "ignore"
+───────────────────────────────────────────────────────────────────────────── */
+@theme {
+  /* ── Palette océan (app globale) ── */
+  --color-ocean-deep:       #0a1828;
+  --color-ocean-blue:       #1e3a5f;
+  --color-ocean-teal:       #178a9a;
+  --color-ocean-turquoise:  #2ec4b6;
+  --color-ocean-light:      #cbf3f0;
+  --color-coral:            #ff6b6b;
+  --color-sand:             #f4e8d0;
+
+  /* ── Palette modale festival ── */
+  --color-sand-950: #0c1118;
+  --color-sand-900: #12171d;
+  --color-sand-800: #1a2230;
+  --color-sand-700: #212d3d;
+  --color-sand-600: #2e3f52;
+  --color-sand-500: #4d6370;
+  --color-sand-400: #8fa8b0;
+  --color-sand-200: #c8dde3;
+  --color-sand-100: #e8ede8;
+
+  --color-teal-400: #3ecfcf;
+  --color-teal-300: #6edede;
+  --color-teal-200: #a8ecec;
+
+  --color-coral-400: #ff6b5b;
+  --color-coral-300: #ff9287;
+
+  --color-amber-400: #f5a623;
+  --color-amber-300: #f8c06a;
+
+  --color-wave-400: #4ecb8d;
+  --color-wave-300: #7ddaaa;
+
+  /* ── Typographie ── */
+  --font-display: 'Bebas Neue', Impact, sans-serif;
+  --font-body:    'Outfit', Inter, sans-serif;
+  --font-serif:   'Playfair Display', 'Cormorant Garamond', Georgia, serif;
+  --font-mono:    'DM Mono', 'Fira Mono', ui-monospace, monospace;
+
+  /* ── Animations ── */
+  --animate-wave:           wave 18s ease-in-out infinite;
+  --animate-float:          float 3s ease-in-out infinite;
+  --animate-pulse-glow:     pulse-glow 2s ease-in-out infinite;
+  --animate-gradient-shift: gradient-shift 8s ease infinite;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Keyframes
+───────────────────────────────────────────────────────────────────────────── */
+@keyframes wave {
+  0%, 100% { transform: translateX(0) translateY(0) scaleY(1); }
+  50%       { transform: translateX(-25%) translateY(-10px) scaleY(1.1); }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-10px); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 30px rgba(46, 196, 182, 0.5); }
+  50%       { box-shadow: 0 0 50px rgba(46, 196, 182, 0.8); }
+}
+
+@keyframes gradient-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50%       { background-position: 100% 50%; }
+}
+
+@keyframes progress-shrink {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+
+@keyframes slide-in {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  to { opacity: 1; }
+}
+
+@keyframes float-particle {
+  0%   { transform: translateY(100vh) translateX(0) rotate(0deg); opacity: 0; }
+  10%  { opacity: 0.4; }
+  90%  { opacity: 0.4; }
+  100% { transform: translateY(-20vh) translateX(50px) rotate(360deg); opacity: 0; }
+}
+
+@keyframes scroll-bounce {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(10px); }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Scrollbar
+───────────────────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgb(15, 23, 42);
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    to bottom,
+    rgba(34, 211, 238, 0),
+    rgba(34, 211, 238, 0.5) 10%,
+    rgba(59, 130, 246, 0.7) 50%,
+    rgba(34, 211, 238, 0.5) 90%,
+    rgba(34, 211, 238, 0)
+  );
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(
+    to bottom,
+    rgba(6, 182, 212, 0),
+    rgba(6, 182, 212, 0.8) 10%,
+    rgba(37, 99, 235, 1) 50%,
+    rgba(6, 182, 212, 0.8) 90%,
+    rgba(6, 182, 212, 0)
+  );
+}
+
+@media (orientation: landscape) {
+  ::-webkit-scrollbar-thumb:horizontal {
+    background: linear-gradient(
+      to right,
+      rgba(34, 211, 238, 0),
+      rgba(34, 211, 238, 0.5) 10%,
+      rgba(59, 130, 246, 0.7) 50%,
+      rgba(34, 211, 238, 0.5) 90%,
+      rgba(34, 211, 238, 0)
+    );
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Variables CSS globales — utilisées via classes arbitraires Tailwind
+   ex: bg-[var(--color-sand-900)], text-[var(--color-teal-400)]
+   
+   Si @theme est supporté par ton setup (plugin Vite @tailwindcss/vite ou
+   postcss @tailwindcss/postcss), tu peux remplacer ce bloc :root par @theme {}
+   pour avoir de vraies classes utilitaires (bg-sand-900, text-teal-400, etc.)
+───────────────────────────────────────────────────────────────────────────── */
+:root {
+  /* ── Palette océan (app globale) ── */
+  --color-ocean-deep:       #0a1828;
+  --color-ocean-blue:       #1e3a5f;
+  --color-ocean-teal:       #178a9a;
+  --color-ocean-turquoise:  #2ec4b6;
+  --color-ocean-light:      #cbf3f0;
+  --color-coral:            #ff6b6b;
+  --color-sand:             #f4e8d0;
+
+  /* ── Palette modale festival ── */
+  --color-sand-950: #0c1118;
+  --color-sand-900: #12171d;
+  --color-sand-800: #1a2230;
+  --color-sand-700: #212d3d;
+  --color-sand-600: #2e3f52;
+  --color-sand-500: #4d6370;
+  --color-sand-400: #8fa8b0;
+  --color-sand-200: #c8dde3;
+  --color-sand-100: #e8ede8;
+
+  --color-teal-400: #3ecfcf;
+  --color-teal-300: #6edede;
+  --color-teal-200: #a8ecec;
+
+  --color-coral-400: #ff6b5b;
+  --color-coral-300: #ff9287;
+
+  --color-amber-400: #f5a623;
+  --color-amber-300: #f8c06a;
+
+  --color-wave-400: #4ecb8d;
+  --color-wave-300: #7ddaaa;
+
+  /* ── Typographie ── */
+  --font-display: 'Bebas Neue', Impact, sans-serif;
+  --font-body:    'Outfit', Inter, sans-serif;
+  --font-serif:   'Playfair Display', 'Cormorant Garamond', Georgia, serif;
+  --font-mono:    'DM Mono', 'Fira Mono', ui-monospace, monospace;
+
+  /* ── Animations ── */
+  --animate-wave:           wave 18s ease-in-out infinite;
+  --animate-float:          float 3s ease-in-out infinite;
+  --animate-pulse-glow:     pulse-glow 2s ease-in-out infinite;
+  --animate-gradient-shift: gradient-shift 8s ease infinite;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Keyframes
+───────────────────────────────────────────────────────────────────────────── */
+@keyframes wave {
+  0%, 100% { transform: translateX(0) translateY(0) scaleY(1); }
+  50%       { transform: translateX(-25%) translateY(-10px) scaleY(1.1); }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-10px); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 30px rgba(46, 196, 182, 0.5); }
+  50%       { box-shadow: 0 0 50px rgba(46, 196, 182, 0.8); }
+}
+
+@keyframes gradient-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50%       { background-position: 100% 50%; }
+}
+
+@keyframes progress-shrink {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+
+@keyframes slide-in {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  to { opacity: 1; }
+}
+
+@keyframes float-particle {
+  0%   { transform: translateY(100vh) translateX(0) rotate(0deg); opacity: 0; }
+  10%  { opacity: 0.4; }
+  90%  { opacity: 0.4; }
+  100% { transform: translateY(-20vh) translateX(50px) rotate(360deg); opacity: 0; }
+}
+
+@keyframes scroll-bounce {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(10px); }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Scrollbar
+───────────────────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgb(15, 23, 42);
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    to bottom,
+    rgba(34, 211, 238, 0),
+    rgba(34, 211, 238, 0.5) 10%,
+    rgba(59, 130, 246, 0.7) 50%,
+    rgba(34, 211, 238, 0.5) 90%,
+    rgba(34, 211, 238, 0)
+  );
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(
+    to bottom,
+    rgba(6, 182, 212, 0),
+    rgba(6, 182, 212, 0.8) 10%,
+    rgba(37, 99, 235, 1) 50%,
+    rgba(6, 182, 212, 0.8) 90%,
+    rgba(6, 182, 212, 0)
+  );
+}
+
+@media (orientation: landscape) {
+  ::-webkit-scrollbar-thumb:horizontal {
+    background: linear-gradient(
+      to right,
+      rgba(34, 211, 238, 0),
+      rgba(34, 211, 238, 0.5) 10%,
+      rgba(59, 130, 246, 0.7) 50%,
+      rgba(34, 211, 238, 0.5) 90%,
+      rgba(34, 211, 238, 0)
+    );
+  }
+}

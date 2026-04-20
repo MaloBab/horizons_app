@@ -1,0 +1,44 @@
+name: Bump & Tag horizons-core
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'horizons-core/**'   # déclenché uniquement si horizons-core est modifié
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # nécessaire pour pousser le commit de version
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Bump patch version
+        id: bump
+        run: |
+          NEW_VERSION=$(python scripts/bump_version.py horizons-core/pyproject.toml)
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Commit & push version bump
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add horizons-core/pyproject.toml
+          git commit -m "chore(horizons-core): bump to v${{ steps.bump.outputs.version }} [skip ci]"
+          git push
+
+      - name: Create git tag
+        run: |
+          git tag "v-core-${{ steps.bump.outputs.version }}"
+          git push origin "v-core-${{ steps.bump.outputs.version }}"

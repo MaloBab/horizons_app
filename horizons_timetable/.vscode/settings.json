@@ -1,0 +1,8 @@
+{
+    "python.analysis.extraPaths": [
+        "./horizons-core/src",
+        "./parsing-benevole/src",
+        "./parsing-poste/src",
+        "./horizons-genetic/src"
+    ]
+}
