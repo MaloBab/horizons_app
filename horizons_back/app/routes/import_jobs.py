@@ -1,6 +1,4 @@
-import hashlib
 import os
-import shutil
 import traceback
 import tempfile
 from pathlib import Path
@@ -40,9 +38,6 @@ async def import_jobs(
         tmp_file.write(content)
         tmp_file.close()
         tmp_path: str = tmp_file.name
-
-        import shutil
-        shutil.copy(tmp_path, "C:/Users/Malo Babinot/Desktop/debug_upload.ods")  # adapte le chemin
 
         report = import_postes_from_file(tmp_path, db)
     except RuntimeError as e:

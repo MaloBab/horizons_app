@@ -35,10 +35,15 @@ app.add_middleware(
     https_only=False,  # True en production
 )
 
+frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
 # Configuration CORS (Cross-Origin Resource Sharing)
 origins = [
+    frontend_url,
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost",
+    "http://127.0.0.1"
 ]
 
 app.add_middleware(

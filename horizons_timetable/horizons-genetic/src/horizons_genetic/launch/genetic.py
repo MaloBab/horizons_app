@@ -30,12 +30,6 @@ def run_genetic(
         tuple (best_solution, engine) pour permettre l'accès aux méta-données
         de fitness en aval (notamment fitness_max_info).
     """
-    
-    with open("C:/Users/Malo Babinot/Desktop/liste.txt", "w", encoding="utf-8") as f:
-        for b in benevoles:
-            comp_name = ", ".join([f"{c.get_nom()} {c.get_prenom()}" for c in b.get_compagnons()]) if b.get_compagnons() else "Aucun"
-            f.write(f"{b.get_nom()} {b.get_prenom()} - {b.get_preferences()}\n nb créneaux : {len(b.get_disponibilites())} - {comp_name} \n\n")
-        f.close()
 
     logger.info("")
     logger.info("=" * 60)
