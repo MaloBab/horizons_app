@@ -102,7 +102,12 @@ export const SATISFACTION_WEIGHTS = {
  * D_nuit et D_charge contribuent chacun à 50 % du score horaire.
  */
 export const SCHEDULE_SUBWEIGHTS = {
-  /** Pénalité pour les heures nocturnes dans le créneau (heures 24–29) */
+  /**
+   * Pénalité pour les postes nocturnes consécutifs enchaînés dans la même journée.
+   * Un seul poste nocturne, aussi long soit-il, n'est pas pénalisé.
+   * La pénalité s'applique uniquement lorsque plusieurs postes distincts se
+   * suivent sans interruption (ou se touchent) en zone nocturne.
+   */
   NIGHT_PENALTY: 0.50,
   /** Pénalité si la charge journalière totale approche ou dépasse la limite */
   DAILY_LOAD:    0.50,
@@ -113,6 +118,22 @@ export const SCHEDULE_SUBWEIGHTS = {
  * 24 = minuit, 29 = 5h du matin.
  */
 export const NIGHT_HOUR_START = 24
+
+/**
+ * Nombre minimum de postes nocturnes CONSÉCUTIFS (se touchant ou se
+ * chevauchant) déclenchant une pénalité de satisfaction.
+ *
+ * Règle :
+ *   - 1 seul poste nocturne (quelle que soit sa durée) → aucune pénalité.
+ *   - 2 postes nocturnes consécutifs → pénalité déclenchée (seuil = 2).
+ *   - N postes → pénalité croissante au-delà du seuil.
+ *
+ * Exemples (seuil = 2) :
+ *   Poste 1h–3h (1 poste)            → chaîne max = 1 < seuil → d_nuit = 1 (pas de pénalité)
+ *   Postes 1h–2h + 2h–3h (2 postes)  → chaîne max = 2 = seuil → pénalité partielle
+ *   Postes 1h–2h + 2h–3h + 3h–4h    → chaîne max = 3         → pénalité plus forte
+ */
+export const CONSECUTIVE_NIGHT_THRESHOLD = 2
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Métriques par bénévole (calculées côté frontend)

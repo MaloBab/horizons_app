@@ -9,11 +9,12 @@ export function generateGeneralScheduleHtml(
   assignmentsByJob: Map<number, { volunteer_id: string }[]>,
 ): string {
   const today     = new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
-  const totalJobs = jobs.length
-  const totalFull = jobs.filter(j => (assignmentsByJob.get(j.id)?.length ?? 0) >= j.required_volunteers).length
+  const generalJobs = jobs.filter(j => j.recruitment_type !== 'Specialise')
+  const totalJobs = generalJobs.length
+  const totalFull = generalJobs.filter(j => (assignmentsByJob.get(j.id)?.length ?? 0) >= j.required_volunteers).length
 
   // ── Tri global croissant : jour puis heure de début ──────────────────────
-  const sorted = [...jobs].sort((a, b) =>
+  const sorted = [...generalJobs].sort((a, b) =>
     a.slot.day_index !== b.slot.day_index
       ? a.slot.day_index - b.slot.day_index
       : a.slot.start_time - b.slot.start_time,
@@ -97,7 +98,7 @@ export function generateGeneralScheduleHtml(
   ${sections}
 
   <footer>
-    <span class="left">Généré automatiquement · Festival</span>
+    <span class="left">Généré automatiquement · Horizons Open Sea Festival</span>
     <span class="right">${today}</span>
   </footer>
 

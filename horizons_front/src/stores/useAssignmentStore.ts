@@ -19,6 +19,7 @@ import {
   SATISFACTION_WEIGHTS,
   SCHEDULE_SUBWEIGHTS,
   NIGHT_HOUR_START,
+  CONSECUTIVE_NIGHT_THRESHOLD,
 } from '../types/assignment.types'
 import { apiFetch } from '../api'
 
@@ -117,6 +118,67 @@ function computeVolunteerMetrics(
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Calcul de la chaîne de postes nocturnes consécutifs
+//
+// Deux postes sont considérés "consécutifs" si l'un commence exactement
+// là où l'autre se termine (end_time du premier = start_time du second).
+// Un poste est "nocturne" si au moins une de ses heures est >= NIGHT_HOUR_START.
+//
+// On retourne la longueur de la plus longue chaîne de postes nocturnes
+// consécutifs sur une journée donnée.
+//
+// Exemples (NIGHT_HOUR_START = 24) :
+//   [poste 25–27]                      → 1 poste nocturne → chaîne max = 1
+//   [poste 25–26, poste 26–27]         → 2 postes consécutifs → chaîne max = 2
+//   [poste 25–26, poste 27–28]         → non consécutifs (gap 26→27) → chaîne max = 1
+//   [poste 23–26, poste 26–27]         → consécutifs, tous deux nocturnes → chaîne max = 2
+//   [poste 9–12, poste 25–26, poste 26–27] → chaîne diurne ignorée → chaîne max = 2
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface NightJobInterval {
+  start: number
+  end:   number
+}
+
+/**
+ * Retourne la longueur de la plus longue chaîne de postes nocturnes
+ * consécutifs (end_i === start_{i+1}) sur l'ensemble des postes fournis.
+ *
+ * Un poste est "nocturne" si son créneau chevauche la plage nocturne
+ * (i.e. end_time > NIGHT_HOUR_START), ce qui inclut les postes qui
+ * démarrent avant minuit mais se prolongent après (ex : 23h–26h).
+ */
+function longestConsecutiveNightJobChain(intervals: NightJobInterval[]): number {
+  if (intervals.length === 0) return 0
+
+  // On ne conserve que les postes nocturnes.
+  // Un poste est nocturne si sa fin dépasse NIGHT_HOUR_START
+  // (il couvre donc au moins une heure >= NIGHT_HOUR_START).
+  const nightJobs = intervals.filter(iv => iv.end > NIGHT_HOUR_START)
+  if (nightJobs.length === 0) return 0
+
+  // Tri par heure de début pour construire les chaînes de gauche à droite.
+  nightJobs.sort((a, b) => a.start - b.start)
+
+  let maxChain = 1
+  let curChain = 1
+
+  for (let i = 1; i < nightJobs.length; i++) {
+    const prev = nightJobs[i - 1]!
+    const curr = nightJobs[i]!
+    // Consécutif : le poste suivant démarre exactement où le précédent se termine.
+    if (curr.start === prev.end) {
+      curChain++
+      if (curChain > maxChain) maxChain = curChain
+    } else {
+      curChain = 1
+    }
+  }
+
+  return maxChain
+}
+
 /**
  * Calcule le score de satisfaction global d'un bénévole [0–1].
  *
@@ -127,13 +189,13 @@ function computeVolunteerMetrics(
  *
  * Critère C (mates)       : le bénévole a-t-il au moins un mate sur ce poste ?
  *                           Ignoré si aucun mate n'est déclaré.
- * Critère D (horaire)     : qualité horaire — calculé UNE FOIS PAR JOUR,
- *                           appliqué uniformément à tous les postes du jour.
- *                           D_nuit   : part des heures nocturnes dans la charge
- *                                      journalière totale (pas dans le créneau
- *                                      isolé). Un seul créneau de nuit sur une
- *                                      journée chargée est acceptable ; c'est
- *                                      l'accumulation nocturne qui est pénalisée.
+ * Critère D (horaire)     : qualité horaire — calculé UNE FOIS PAR JOUR.
+ *                           D_nuit   : nombre de POSTES nocturnes CONSÉCUTIFS
+ *                                      (se touchant bout-à-bout) dans la journée.
+ *                                      Un seul poste nocturne, même long, n'est
+ *                                      pas pénalisé. La pénalité s'applique dès
+ *                                      que deux postes distincts s'enchaînent en
+ *                                      zone nocturne.
  *                           D_charge : charge journalière totale vs limite autorisée.
  * Critère B (préférences) : la catégorie du poste correspond-elle à une
  *                           préférence déclarée ? Ignoré si aucune préférence.
@@ -152,9 +214,6 @@ function computeSatisfactionScore(
   const limit    = DAILY_HOUR_LIMITS[volunteer.volunteer_type as keyof typeof DAILY_HOUR_LIMITS] ?? 6
 
   // ── Poids actifs, renormalisés selon les critères applicables ─────────────
-  //
-  // On part des poids de base et on met à 0 les critères non applicables,
-  // puis on divise chaque poids par la somme pour ramener à 1.
   const rawWeights = {
     mates:       hasMates ? SATISFACTION_WEIGHTS.MATES       : 0,
     schedule:                SATISFACTION_WEIGHTS.SCHEDULE,
@@ -169,33 +228,41 @@ function computeSatisfactionScore(
 
   // ── Score D : calculé une fois par jour ───────────────────────────────────
   //
-  // On agrège toutes les heures du bénévole sur chaque jour pour obtenir
-  // la charge nocturne journalière réelle, puis on calcule D_nuit et D_charge
-  // au niveau du jour. Tous les postes d'un même jour partagent le même score D.
+  // On collecte les intervalles (start_time, end_time) de tous les postes
+  // nocturnes du bénévole pour chaque journée, puis on calcule la plus
+  // longue chaîne de postes consécutifs (end_i === start_{i+1}).
   //
-  // Exemple : postes 0h–2h et 2h–4h le même jour
-  //   → night_hours_per_day = 4, total_hours = 4, d_nuit = 0 (100% de nuit)
-  //   Un seul poste 0h–2h sur une journée de 6h
-  //   → night_hours_per_day = 2, total_hours = 6, d_nuit = 0.67
+  // La pénalité ne s'applique qu'à partir de CONSECUTIVE_NIGHT_THRESHOLD
+  // postes enchaînés ; un seul poste isolé, même de plusieurs heures, n'est
+  // jamais pénalisé.
+  //
+  // Exemples (seuil = 2) :
+  //   1 poste 1h–3h                    → chaîne = 1 < seuil → d_nuit = 1 (aucune pénalité)
+  //   2 postes 1h–2h puis 2h–3h        → chaîne = 2 = seuil → pénalité partielle
+  //   3 postes 1h–2h, 2h–3h, 3h–4h    → chaîne = 3         → pénalité plus forte
 
-  // Accumulation des heures nocturnes par jour (toutes les heures >= NIGHT_HOUR_START)
-  const night_hours_per_day: Record<number, number> = {}
+  // Collecte des intervalles nocturnes par jour
+  const nightJobsPerDay: Record<number, NightJobInterval[]> = {}
   for (const assignment of myAssignments) {
     const job = allJobs.find(j => j.id === assignment.job_id)
     if (!job) continue
-    const day        = job.slot.day_index
-    const nightCount = hoursInSlot(job.slot.start_time, job.slot.end_time)
-      .filter(h => h >= NIGHT_HOUR_START).length
-    night_hours_per_day[day] = (night_hours_per_day[day] ?? 0) + nightCount
+    // Poste nocturne si son créneau dépasse NIGHT_HOUR_START
+    if (job.slot.end_time <= NIGHT_HOUR_START) continue
+    const day = job.slot.day_index
+    if (!nightJobsPerDay[day]) nightJobsPerDay[day] = []
+    nightJobsPerDay[day].push({ start: job.slot.start_time, end: job.slot.end_time })
   }
 
   const d_score_per_day: Record<number, number> = {}
   for (const [dayStr, totalHours] of Object.entries(hours_per_day)) {
-    const day        = Number(dayStr)
-    const nightHours = night_hours_per_day[day] ?? 0
+    const day      = Number(dayStr)
+    const chain    = longestConsecutiveNightJobChain(nightJobsPerDay[day] ?? [])
 
-    // D_nuit : part des heures nocturnes dans la charge journalière totale
-    const d_nuit   = totalHours > 0 ? 1 - nightHours / totalHours : 1
+    // Aucune pénalité sous le seuil ; pénalité croissante au-delà.
+    // Ex (seuil=2) : 1 poste → 1.0 ; 2 postes contigus → 0.5 ; 4+ → 0.0
+    const d_nuit = chain < CONSECUTIVE_NIGHT_THRESHOLD
+      ? 1
+      : Math.max(0, 1 - (chain - CONSECUTIVE_NIGHT_THRESHOLD + 1) / CONSECUTIVE_NIGHT_THRESHOLD)
 
     // D_charge : charge journalière totale vs limite du type de bénévole
     const d_charge = 1 - Math.min(totalHours / limit, 1)
@@ -218,7 +285,7 @@ function computeSatisfactionScore(
           x.volunteer_id !== volunteer.id &&
           mateIds.has(x.volunteer_id)
         ) ? 1 : 0)
-      : 0 // poids déjà mis à 0, valeur sans importance
+      : 0
 
     // Critère D — score journalier pré-calculé (identique pour tous les postes du jour)
     const score_d = d_score_per_day[job.slot.day_index] ?? 1
@@ -231,7 +298,7 @@ function computeSatisfactionScore(
           )
           return pref ? (nbPrefs - pref.rank + 1) / nbPrefs : 0
         })()
-      : 0 // poids déjà mis à 0, valeur sans importance
+      : 0
 
     scoreSum += w.mates * score_c + w.schedule * score_d + w.preferences * score_b
   }
@@ -306,7 +373,7 @@ export const useAssignmentStore = defineStore('assignment', () => {
     const metrics = [...metricsMap.value.values()]
 
     // Moyenne sur les bénévoles ayant au moins une affectation (score non null)
-    const scoredMetrics  = metrics.filter(m => m.satisfaction_score !== null)
+    const scoredMetrics    = metrics.filter(m => m.satisfaction_score !== null)
     const avg_satisfaction = scoredMetrics.length > 0
       ? scoredMetrics.reduce((s, m) => s + (m.satisfaction_score ?? 0), 0) / scoredMetrics.length
       : 0
@@ -475,9 +542,9 @@ export const useAssignmentStore = defineStore('assignment', () => {
     const cmd = history.value[historyIndex.value]!
     historyIndex.value--
     switch (cmd.type) {
-      case 'assign':   _applyUnassign(cmd.assignment);               break
-      case 'unassign': _applyAssign(cmd.assignment);                 break
-      case 'reassign': _applyUnassign(cmd.to); _applyAssign(cmd.from); break
+      case 'assign':   _applyUnassign(cmd.assignment);                  break
+      case 'unassign': _applyAssign(cmd.assignment);                    break
+      case 'reassign': _applyUnassign(cmd.to); _applyAssign(cmd.from);  break
     }
   }
 
@@ -486,9 +553,9 @@ export const useAssignmentStore = defineStore('assignment', () => {
     historyIndex.value++
     const cmd = history.value[historyIndex.value]!
     switch (cmd.type) {
-      case 'assign':   _applyAssign(cmd.assignment);                 break
-      case 'unassign': _applyUnassign(cmd.assignment);               break
-      case 'reassign': _applyUnassign(cmd.from); _applyAssign(cmd.to); break
+      case 'assign':   _applyAssign(cmd.assignment);                    break
+      case 'unassign': _applyUnassign(cmd.assignment);                  break
+      case 'reassign': _applyUnassign(cmd.from); _applyAssign(cmd.to);  break
     }
   }
 

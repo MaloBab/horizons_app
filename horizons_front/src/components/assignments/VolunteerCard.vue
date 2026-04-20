@@ -60,10 +60,10 @@
         <div class="h-1 flex-1 bg-slate-700 rounded-full overflow-hidden">
           <div class="h-full rounded-full transition-all duration-500"
             :class="satisfactionBarColor"
-            :style="{ width: `${Math.round(metrics.satisfaction_score ?? 0 * 100)}%` }" />
+            :style="{ width: `${Math.round((metrics.satisfaction_score ?? 0) * 100)}%` }" />
         </div>
         <span class="text-[10px] font-mono text-slate-400 w-7 text-right">
-          {{ Math.round(metrics.satisfaction_score ?? 0 * 100) }}%
+          {{Math.round((metrics.satisfaction_score ?? 0) * 100)}}%
         </span>
       </div>
       <div v-if="volunteer.mates.length > 0"

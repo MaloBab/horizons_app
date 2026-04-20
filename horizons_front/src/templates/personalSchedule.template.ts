@@ -121,7 +121,7 @@ export function generatePersonalScheduleHtml(
     </table>`}
 
   <footer>
-    <span class="left">Généré automatiquement · Festival</span>
+    <span class="left">Généré automatiquement · Horizons Open Sea Festival</span>
     <span class="right">${today}</span>
   </footer>
 
