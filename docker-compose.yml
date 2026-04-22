@@ -38,5 +38,14 @@ services:
     depends_on:
       - backend
 
+  # SERVICE ANTI-RÉCUPÉRATION ORACLE (Inactif en local)
+  oracle-keep-alive:
+    image: azukaar/lookbusy
+    container_name: oracle_anti_idle
+    restart: always
+    profiles:
+      - prod
+    command: ["-c", "15", "-m", "2000MB"]
+
 volumes:
   postgres_data:
