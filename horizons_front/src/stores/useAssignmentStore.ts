@@ -265,7 +265,8 @@ function computeSatisfactionScore(
       : Math.max(0, 1 - (chain - CONSECUTIVE_NIGHT_THRESHOLD + 1) / CONSECUTIVE_NIGHT_THRESHOLD)
 
     // D_charge : charge journalière totale vs limite du type de bénévole
-    const d_charge = 1 - Math.min(totalHours / limit, 1)
+    const excess = Math.max(0, totalHours - limit)
+    const d_charge = 1 - Math.min(excess / limit, 1)
 
     d_score_per_day[day] = SCHEDULE_SUBWEIGHTS.NIGHT_PENALTY * d_nuit
                          + SCHEDULE_SUBWEIGHTS.DAILY_LOAD    * d_charge

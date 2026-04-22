@@ -60,6 +60,7 @@
               type="color"
               :value="currentColor"
               class="sr-only"
+              @mousedown.stop
               @focus="pickerOpen = true"
               @blur="pickerOpen = false"
               @input="onPickerInput"
