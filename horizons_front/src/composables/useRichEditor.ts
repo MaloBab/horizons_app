@@ -141,9 +141,13 @@ export function useRichEditor(editorRef: Ref<HTMLElement | null>) {
   }
 
   const onColorPickerClose = () => {
-    editorRef.value?.focus()
     const sel = window.getSelection()
-    if (savedRange) { sel?.removeAllRanges(); sel?.addRange(savedRange) }
+    if (savedRange) {
+      try {
+        sel?.removeAllRanges()
+        sel?.addRange(savedRange)
+      } catch (_) {}
+    }
     savedRange = null
   }
 

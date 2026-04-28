@@ -20,8 +20,8 @@
 
     <SizeDropdown ref="sizeDropdownRef" @apply-size="emit('applySize', $event)" />
 
-    <!-- Color picker dropdown -->
     <ColorDropdown
+      ref="colorDropdownRef"
       :active-color="activeColor"
       @apply-color="emit('applyColor', $event)"
       @save-selection="emit('saveSelection')"
@@ -106,12 +106,22 @@ const emit = defineEmits<{
 
 const sizeDropdownRef  = ref<InstanceType<typeof SizeDropdown> | null>(null)
 const tableDropdownRef = ref<InstanceType<typeof TableDropdown> | null>(null)
+const colorDropdownRef = ref<InstanceType<typeof ColorDropdown> | null>(null)
 const toolbarRef       = ref<HTMLElement | null>(null)
 
+// Ferme tous les dropdowns — appelé depuis RichEditor sur clic extérieur
 const closeDropdowns = () => {
   sizeDropdownRef.value?.close()
   tableDropdownRef.value?.close()
+  colorDropdownRef.value?.close()
 }
 
-defineExpose({ toolbarRef, closeDropdowns })
+// Vérifie si un nœud appartient à la toolbar OU à un panel téléporté
+const containsNode = (node: Node): boolean => {
+  if (toolbarRef.value?.contains(node)) return true
+  if (colorDropdownRef.value?.panelRef?.contains(node)) return true
+  return false
+}
+
+defineExpose({ toolbarRef, closeDropdowns, containsNode })
 </script>

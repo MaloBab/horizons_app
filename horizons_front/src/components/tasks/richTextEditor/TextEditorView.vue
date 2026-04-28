@@ -64,8 +64,7 @@ onUnmounted(() => {
 })
 
 const handleClickOutside = (e: MouseEvent) => {
-  const toolbar = toolbarRef.value?.toolbarRef
-  if (toolbar?.contains(e.target as Node)) return
+  if (toolbarRef.value?.containsNode(e.target as Node)) return
   toolbarRef.value?.closeDropdowns()
 }
 
