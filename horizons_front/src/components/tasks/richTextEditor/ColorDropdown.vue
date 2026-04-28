@@ -62,8 +62,7 @@
               :value="currentColor"
               class="sr-only"
               @mousedown.stop
-              @focus="pickerOpen = true"
-              @blur="pickerOpen = false"
+              @click="pickerOpen = true"
               @input="onPickerInput"
               @change="onPickerChange"
             />
