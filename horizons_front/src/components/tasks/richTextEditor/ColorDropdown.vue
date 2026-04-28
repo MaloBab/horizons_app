@@ -13,6 +13,7 @@
     <Teleport to="body">
       <div
         v-if="show"
+        ref="panelRef"
         class="fixed z-9999 bg-slate-800 border border-white/10 rounded-xl shadow-2xl p-3 flex flex-col gap-2.5 w-52"
         :style="pos"
         @mousedown.stop
@@ -148,12 +149,16 @@ const addRecent = (color: string) => {
   recentColors.value = [color, ...filtered].slice(0, MAX_RECENT)
 }
 
+const panelRef = ref<HTMLElement | null>(null)
+
 const onOutside = (e: MouseEvent) => {
-  if (pickerOpen.value) return    
-  if (!btnRef.value?.contains(e.target as Node)) {
-    show.value = false
-  }
+  if (pickerOpen.value) return
+  const target = e.target as Node
+  if (btnRef.value?.contains(target)) return
+  if (panelRef.value?.contains(target)) return  // ← panel téléporté non couvert par btnRef
+  show.value = false
 }
+
 onMounted(() => document.addEventListener('mousedown', onOutside))
 onUnmounted(() => document.removeEventListener('mousedown', onOutside))
 </script>
