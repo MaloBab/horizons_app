@@ -21,8 +21,8 @@ class GeneticConfig:
 
     """
 
-    population_size:  int   = 600
-    generations:      int   = 750
+    population_size:  int   = 450
+    generations:      int   = 700
     elite_count:      int | None = field(default=None)
     crossover_rate:   float = 0.6
     mutation_rate:    float = 0.1

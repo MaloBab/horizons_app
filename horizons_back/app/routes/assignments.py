@@ -128,10 +128,14 @@ async def run_algorithm_sse(db: Session = Depends(get_db)):
     async def event_stream():
         yield "data: {\"pct\": 0, \"msg\": \"Initialisation...\"}\n\n"
         while True:
-            event = await queue.get()
-            yield f"data: {json.dumps(event)}\n\n"
-            if event.get("done") or event.get("error"):
-                break
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=15.0)
+                yield f"data: {json.dumps(event)}\n\n"
+                
+                if event.get("done") or event.get("error"):
+                    break
+            except asyncio.TimeoutError:
+                yield ": keep-alive\n\n"
 
     return StreamingResponse(
         event_stream(),
