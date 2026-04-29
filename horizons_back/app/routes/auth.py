@@ -69,7 +69,13 @@ def login(
 @router.get("/google")
 async def google_login(request: Request):
     """Redirige l'utilisateur vers la page de consentement Google."""
-    redirect_uri = str(request.url_for("google_callback"))
+    url = str(request.url_for("google_callback"))
+    
+    if "localhost" not in str(url):
+        redirect_uri = str(url).replace("http://", "https://")
+    else:
+        redirect_uri = str(url)
+    
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
