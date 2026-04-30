@@ -8,17 +8,11 @@ Types de mutation :
   - Shift      (10 %) : déplace un bénévole vers un poste temporellement adjacent
   - Preference (10 %) : swap dans la même catégorie pour améliorer les préférences
 
-REFONTE MAJEURE — _fill_mutation :
-  Contexte : avec moins de bénévoles que de slots, tous les bénévoles sont
-  affectés dès la génération 0. La mutation inject (qui cherche des bénévoles
-  NON affectés) trouve donc une liste vide et ne fait rien.
-
-  _fill_mutation est le seul mécanisme capable d'augmenter la couverture
-  après l'initialisation : elle prend un bénévole DÉJÀ affecté qui a encore
-  de la capacité horaire disponible et l'affecte à un slot vide supplémentaire.
-
-  Ciblage : les slots vides sont triés par score_affectation pour maximiser
-  la qualité des nouvelles affectations.
+OPTIMISATION — ScoreCache :
+  Les appels répétés à score_affectation() dans _fill_mutation représentaient
+  le principal goulot d'étranglement CPU (tri de tous les bénévoles pour chaque
+  slot vide, à chaque mutation). On utilise maintenant ScoreCache.get() — O(1)
+  au lieu de recalculer disponibilité + préférences à chaque fois.
 """
 import random
 from typing import Callable
@@ -26,7 +20,7 @@ from typing import Callable
 from horizons_core.dataclass.poste import Poste
 from horizons_genetic.genetic.core.chromosome import LightweightChromosome
 from horizons_genetic.genetic.operators.mutation.i_mutation import MutationOperator
-from horizons_genetic.genetic.fitness.affectation_scorer import score_affectation
+from horizons_genetic.genetic.fitness.affectation_scorer import ScoreCache
 from horizons_genetic.genetic.utils.index_manager import IndexManager
 from horizons_genetic.genetic.utils.daily_hours_checker import (
     compute_daily_hours,
@@ -51,6 +45,7 @@ class AdaptiveMutation(MutationOperator):
         base_mutation_rate: float = 0.06,
         max_retries:        int   = 10,
         all_benevole_ids:   set[int] | None = None,
+        score_cache:        ScoreCache | None = None,
     ):
         self.postes             = postes
         self.index_manager      = index_manager
@@ -58,17 +53,21 @@ class AdaptiveMutation(MutationOperator):
         self.max_retries        = max_retries
         self.all_benevole_ids   = all_benevole_ids or set()
 
+        # ── Cache de scores statique ──────────────────────────────────
+        # Construit une seule fois, partagé avec GeneticEngine et
+        # PopulationInitializer pour éviter plusieurs allocations.
+        self.score_cache = score_cache or ScoreCache(index_manager)
+
         self.benevoles = [
             index_manager.id_to_benevole(i)
             for i in range(len(index_manager._id_to_benevole))
         ]
 
         # (fonction, probabilité) — somme = 1.0
-        # Fill en tête : mécanisme central pour augmenter la couverture
         self.mutation_types: list[tuple[Callable, float]] = [
             (self._fill_mutation,       0.35),
             (self._swap_mutation,       0.30),
-            (self._inject_mutation,     0.15),  # utile si surplus de bénévoles
+            (self._inject_mutation,     0.15),
             (self._shift_mutation,      0.10),
             (self._preference_mutation, 0.10),
         ]
@@ -207,7 +206,7 @@ class AdaptiveMutation(MutationOperator):
             if violates_daily_limit(b_id, new_creneau, {b_id: sim}, self.index_manager):
                 return False
             return True
-        
+
         return _check(b1_id, poste1_id, creneau2) and _check(b2_id, poste2_id, creneau1)
 
     # ------------------------------------------------------------------
@@ -218,18 +217,9 @@ class AdaptiveMutation(MutationOperator):
         """
         Ajoute un bénévole DÉJÀ AFFECTÉ à un slot vide supplémentaire.
 
-        C'est le mécanisme central pour augmenter la couverture quand tous
-        les bénévoles sont déjà utilisés (moins de bénévoles que de slots).
-
-        Workflow :
-          1. Identifier les slots vides
-          2. Pour chaque slot vide, chercher parmi les bénévoles déjà affectés
-             celui qui a la meilleure adéquation ET qui peut être ajouté
-             (disponible, pas en conflit, pas en surcharge horaire)
-          3. Injecter le meilleur candidat trouvé
-
-        Batch adaptatif : on tente jusqu'à N injections selon le taux de
-        remplissage, pour équilibrer couverture et diversité génétique.
+        OPTIMISATION : utilise score_cache.get() au lieu de score_affectation()
+        pour les tris de candidats — O(1) au lieu de recalculer disponibilité
+        et préférences à chaque appel.
         """
         empty_slots = [
             (p_id, i)
@@ -257,32 +247,32 @@ class AdaptiveMutation(MutationOperator):
         assignments = chromosome.get_benevole_assignments()
         all_b_ids   = list(self.all_benevole_ids)
 
-        # Échantillon de slots vides à traiter (évite un tri exhaustif)
+        # Échantillon de slots vides à traiter
         candidate_slots = random.sample(
             empty_slots, min(len(empty_slots), max_fills * 4)
         )
 
-        # Trier les slots par score du meilleur candidat disponible
+        # Trier les slots par score du meilleur candidat disponible (via cache)
         scored_slots = sorted(
             candidate_slots,
             key=lambda slot: max(
-                (score_affectation(b_id, slot[0], self.index_manager) for b_id in all_b_ids),
+                (self.score_cache.get(b_id, slot[0]) for b_id in all_b_ids),
                 default=0.0,
             ),
             reverse=True,
         )
 
-        mutated    = chromosome.clone()
-        n_filled   = 0
+        mutated  = chromosome.clone()
+        n_filled = 0
 
         for poste_id, slot in scored_slots:
             if n_filled >= max_fills:
                 break
 
-            # Trier les candidats par score pour ce poste précis
+            # Trier les candidats par score pour ce poste précis (via cache)
             scored_candidates = sorted(
                 all_b_ids,
-                key=lambda b_id: score_affectation(b_id, poste_id, self.index_manager),
+                key=lambda b_id: self.score_cache.get(b_id, poste_id),
                 reverse=True,
             )
 
@@ -293,7 +283,7 @@ class AdaptiveMutation(MutationOperator):
                 if self._is_assignable(b_id, poste_id, daily_hours, assignments):
                     mutated.poste_to_benevoles[poste_id][slot] = b_id
 
-                    # Mise à jour incrémentale pour les prochaines validations
+                    # Mise à jour incrémentale
                     creneau = self.index_manager.id_to_poste(poste_id).get_horaire()
                     jour    = creneau.get_jour()
                     duree   = creneau.get_borne_sup() - creneau.get_borne_inf()
@@ -311,8 +301,6 @@ class AdaptiveMutation(MutationOperator):
         """
         Place un bénévole NON AFFECTÉ dans un slot vide.
         Utile uniquement quand il y a un surplus de bénévoles.
-        Dans le cas contraire (tous affectés dès gen 0), cette mutation
-        ne fait rien et _fill_mutation prend le relais.
         """
         assigned   = chromosome.get_assigned_benevoles()
         unassigned = list(self.all_benevole_ids - assigned)

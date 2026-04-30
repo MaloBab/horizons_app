@@ -1,27 +1,6 @@
 """
 Poids pour le calcul de fitness.
 
-PHILOSOPHIE — FITNESS TOUT-BONUS + PÉNALITÉS CIBLÉES :
-  Le GA compare des solutions entre elles, pas contre un absolu.
-
-  On encode UNIQUEMENT des récompenses positives et des pénalités
-  proportionnelles à l'écart par rapport à l'idéal :
-
-    ✅  poste rempli              → reward (signal le plus fort)
-    ✅  préférence respectée      → reward
-    ✅  compagnons ensemble       → reward
-    ✅  charge équilibrée         → reward (bénévole bien utilisé)
-    ⛔  bénévole non affecté      → pénalité (moins grave qu'un poste vide)
-    ⛔  consécutifs excessifs     → pénalité au-delà du seuil raisonnable
-    ⛔  violation horaire         → pénalité GRADUÉE (proportionnelle à l'excès)
-
-  SUPPRESSION DE benevole_affecte (bonus) :
-    L'ancien bonus "bénévole affecté" saturait rapidement (dès que tous les
-    bénévoles avaient au moins un poste, le signal devenait une constante
-    et ne guidait plus le GA). Il est remplacé par une PÉNALITÉ proportionnelle
-    au nombre de bénévoles laissés sans rôle — ce gradient reste actif toute
-    l'évolution, y compris en fin de convergence.
-
   CALIBRATION DES PRIORITÉS (ordre décroissant) :
     1. Couverture opérationnelle   : position_remplie (200)
     2. Satisfaction individuelle   : compagnon (180), préférences (120)
@@ -47,11 +26,10 @@ class FitnessWeights:
     """Poids pour le calcul de fitness — bonus positifs + pénalités graduées."""
 
     # ── Couverture opérationnelle ─────────────────────────────────────
-    position_remplie:    float = 200.0   # Poste pourvu → signal le plus fort
-
+    position_remplie:    float = 200.0 
     # ── Satisfaction individuelle ─────────────────────────────────────
     preference_match:             float = 120.0  # Rang 1 = 120 × n_prefs, rang 2 = 120 × (n-1)…
-    compagnon_travaille_ensemble: float = 180.0  # Par paire de compagnons réunis
+    compagnon_travaille_ensemble: float = 200.0  # Par paire de compagnons réunis
 
     # ── Équité collective ─────────────────────────────────────────────
     # Récompense quand la charge d'un bénévole est ≥ 1h et ≤ (limite - 1h).

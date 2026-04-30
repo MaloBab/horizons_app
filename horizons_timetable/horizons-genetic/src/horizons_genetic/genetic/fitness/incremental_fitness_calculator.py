@@ -10,21 +10,14 @@ SCORES DE FITNESS (tout-bonus sauf pénalités ciblées) :
   - consecutifs_excessifs  : malus si plus de `seuil_consecutifs` paires consécutives
   - violation_horaire      : pénalité graduée par heure d'excès
 
-SUPPRESSION DE benevole_affecte (bonus) :
-  Remplacé par une pénalité benevole_non_affecte — le gradient reste actif
-  toute l'évolution, même quand la majorité des bénévoles sont déjà placés.
+OPTIMISATION MÉMOIRE — store_raw :
+  Le paramètre store_raw (défaut False) contrôle si le dict détaillé des scores
+  est conservé dans le chromosome. Pendant l'évolution, on n'en a pas besoin :
+  seul le scalaire fitness guide la sélection. On ne stocke les raw_scores que
+  pour le meilleur individu final (pour les logs/statistiques).
 
-CORRECTION BUG PRÉFÉRENCES :
-  benevole.get_preferences() retourne list[str].
-  On utilise PREFERENCES_TO_POSTES pour résoudre str → frozenset[pole_id].
-
-CORRECTION BUG CONSÉCUTIFS (off-by-one) :
-  Le compteur commence à 1 dès la première paire touchante (et non à 0),
-  ce qui aligne correctement le calcul avec seuil_consecutifs.
-  Exemple corrigé (seuil=2) :
-    2 créneaux qui se touchent → consecutive=1 → pas pénalisé ✅
-    3 créneaux consécutifs     → consecutive=2 → pas pénalisé ✅
-    4 créneaux consécutifs     → consecutive=3 → pénalisé     ✅
+  Gain : ~6 dict Python × taille_population alloués/libérés par génération en
+  moins, ce qui réduit la pression GC sur un Raspberry Pi.
 """
 from horizons_core.utils.enums import PREFERENCES_TO_POSTES
 from horizons_genetic.genetic.fitness.fitness_weights import GradualFitnessWeights
@@ -66,8 +59,19 @@ class IncrementalFitnessCalculator:
         self,
         chromosome: LightweightChromosome,
         all_benevole_ids: set[int],
+        store_raw: bool = False,
     ) -> float:
-        """Calcule et stocke le fitness du chromosome. Retourne la valeur."""
+        """
+        Calcule et stocke le fitness du chromosome. Retourne la valeur.
+
+        Args:
+            chromosome:       Chromosome à évaluer.
+            all_benevole_ids: Ensemble de tous les IDs bénévoles.
+            store_raw:        Si True, stocke le dict détaillé des scores dans le
+                              chromosome (utile uniquement pour le meilleur final).
+                              Par défaut False pour économiser la mémoire pendant
+                              l'évolution.
+        """
 
         # ── Contrainte dure : limites horaires ────────────────────────
         violation_penalty = compute_daily_violation_penalty(
@@ -78,7 +82,12 @@ class IncrementalFitnessCalculator:
         scores = self._calculate_scores(chromosome, all_benevole_ids)
 
         total = sum(scores.values()) + violation_penalty
-        chromosome.set_fitness(total, {**scores, 'violation_horaire': violation_penalty})
+
+        if store_raw:
+            chromosome.set_fitness(total, {**scores, 'violation_horaire': violation_penalty})
+        else:
+            chromosome.set_fitness(total, None)
+
         return total
 
     # ------------------------------------------------------------------
@@ -99,8 +108,6 @@ class IncrementalFitnessCalculator:
         scores['positions_remplies'] = filled * self.weights.position_remplie
 
         # ── 2. Bénévoles non affectés (pénalité) ─────────────────────
-        # Gradient actif toute l'évolution — remplace l'ancien bonus benevole_affecte
-        # qui saturait dès que tous les bénévoles avaient au moins un poste.
         unassigned_count = len(all_benevole_ids) - len(assigned)
         scores['benevoles_non_affectes'] = -unassigned_count * self.weights.benevole_non_affecte
 
@@ -182,9 +189,6 @@ class IncrementalFitnessCalculator:
         - Bénévole à 0h        → déjà pénalisé par benevole_non_affecte, pas de double pénalité ici
         - Charge dans [1h, limite-1h] → bonus charge_bien_utilisee
         - Charge = limite ou > → pas de bonus (ni pénalité ici, la violation horaire gère l'excès)
-
-        En itérant sur all_benevole_ids, le signal reste sensible aux bénévoles
-        sous-exploités même quand ils ont techniquement au moins une affectation.
         """
         score       = 0.0
         daily_hours = compute_daily_hours(chromosome.poste_to_benevoles, self.index_manager)
@@ -192,7 +196,6 @@ class IncrementalFitnessCalculator:
         for b_id in all_benevole_ids:
             hours_by_day = daily_hours.get(b_id, {})
             if not hours_by_day:
-                # Bénévole à 0h — pénalité gérée par benevole_non_affecte
                 continue
             limit = get_daily_limit(b_id, self.index_manager)
             for h in hours_by_day.values():
@@ -232,10 +235,10 @@ class IncrementalFitnessCalculator:
                     c1.get_jour() == c2.get_jour()
                     and c1.get_borne_sup() == c2.get_borne_inf()
                 ):
-                    consecutive += 1  # FIX : commence à 1 dès la 1ère paire touchante
+                    consecutive += 1
                     is_night = c2.get_borne_inf() >= 23
                     score   += self.weights.calculate_consecutive_penalty(consecutive, is_night)
                 else:
-                    consecutive = 0  # réinitialisation entre les séquences
+                    consecutive = 0
 
         return score

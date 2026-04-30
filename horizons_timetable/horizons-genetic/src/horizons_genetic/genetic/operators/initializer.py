@@ -4,6 +4,10 @@ Initialisation hybride de la population : greedy + semi-random + random.
 Chaque stratégie respecte les CONTRAINTES DURES dès la création :
   - Pas de conflit horaire pour un bénévole
   - Limite journalière respectée (NORMAL : 6h, SPÉCIALISÉ : 2h)
+
+OPTIMISATION — ScoreCache :
+  Les tris greedy utilisent score_cache.get() au lieu de recalculer
+  score_affectation() à chaque candidat.
 """
 import logging
 import random
@@ -15,7 +19,7 @@ from horizons_core.dataclass.benevole import Benevole
 from horizons_genetic.genetic.core.chromosome import LightweightChromosome
 from horizons_genetic.genetic.core.population import LightweightPopulation
 from horizons_genetic.genetic.utils.index_manager import IndexManager
-from horizons_genetic.genetic.fitness.affectation_scorer import score_affectation
+from horizons_genetic.genetic.fitness.affectation_scorer import ScoreCache
 from horizons_genetic.genetic.utils.daily_hours_checker import (
     violates_daily_limit,
     compute_daily_hours,
@@ -39,10 +43,15 @@ class PopulationInitializer:
         postes:        list[Poste],
         benevoles:     list[Benevole],
         index_manager: IndexManager,
+        score_cache:   ScoreCache | None = None,
     ):
         self.postes        = postes
         self.benevoles     = benevoles
         self.index_manager = index_manager
+
+        # Cache de scores partagé (construit une seule fois dans GeneticEngine)
+        self.score_cache = score_cache or ScoreCache(index_manager)
+
         self._build_availability_cache()
 
     # ------------------------------------------------------------------
@@ -111,6 +120,8 @@ class PopulationInitializer:
         Crée un chromosome en respectant les contraintes dures :
           1. Pas de conflit horaire
           2. Limite journalière selon le type de bénévole
+
+        OPTIMISATION : utilise score_cache.get() pour les tris greedy.
         """
         poste_to_benevoles: dict[int, list[int]]      = {}
         daily_hours:        dict[int, dict[int, float]] = {}
@@ -127,10 +138,10 @@ class PopulationInitializer:
             ]
 
             if greedy_prob > 0 and random.random() < greedy_prob:
-                # Tri par score (bug préférences corrigé via score_affectation)
+                # Tri par score via cache O(1)
                 candidates = sorted(
                     candidates,
-                    key=lambda b_id: score_affectation(b_id, poste_id, self.index_manager),
+                    key=lambda b_id: self.score_cache.get(b_id, poste_id),
                     reverse=True,
                 )
 

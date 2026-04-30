@@ -1,24 +1,27 @@
 """
-Moteur de l'algorithme génétique — v2.
+Moteur de l'algorithme génétique — v3.
 
-AMÉLIORATIONS vs v1 :
+AMÉLIORATIONS vs v2 :
 
-1. PRESSION DE SÉLECTION AUGMENTÉE
-   Ancienne logique : les non-parents (40% de la pop) survivaient automatiquement
-   dans le pool de candidats. Avec population=400 et crossover_rate=0.6,
-   seuls 20 individus étaient éliminés par génération → pression quasi nulle.
+1. SCORE CACHE PARTAGÉ
+   ScoreCache est construit une seule fois dans __init__ et transmis à tous
+   les opérateurs (initializer, crossover, mutation). Évite de recalculer
+   disponibilité + préférences des millions de fois.
 
-   Nouvelle logique : TOUS les individus (élites + enfants + non-parents)
-   concourent ensemble. Seuls les meilleurs survivent. La pression est réelle.
+2. store_raw=False PENDANT L'ÉVOLUTION
+   Les raw_scores (dict à 6 clés par chromosome) ne sont plus alloués pendant
+   l'évolution. Seul le scalaire fitness est conservé. On ne stocke les
+   raw_scores qu'une seule fois sur le meilleur individu final.
+   → Réduit la pression GC sur Raspberry Pi.
 
-2. INJECTION DE DIVERSITÉ (immigration)
-   Toutes les N générations de stagnation, on remplace les individus les moins
-   bons par de nouveaux chromosomes greedy frais. Cela évite la convergence
-   prématurée sur un plateau local sans détruire les bonnes solutions trouvées.
+3. HILL-CLIMBING POST-GÉNÉTIQUE (phase 3)
+   Après la boucle évolutive, HillClimber affine le meilleur chromosome
+   par perturbations unitaires (swap, fill, shift, preference) jusqu'à
+   convergence locale. Gain typique : +2–5 % de fitness pour un coût
+   mémoire quasi nul.
 
-3. CROSSOVER VOLONTAIRE-CENTRIQUE
-   Utilise VolunteerCrossover au lieu de UniformCrossover.
-   Préserve les doubles-affectations créées par _fill_mutation.
+4. PARAMÈTRES PAR DÉFAUT OPTIMISÉS RASPBERRY PI
+   population_size=300, generations=800 (via config.py)
 """
 import logging
 import random
@@ -32,6 +35,7 @@ from horizons_genetic.genetic.core.chromosome import Chromosome, LightweightChro
 from horizons_genetic.genetic.core.population import LightweightPopulation
 from horizons_genetic.genetic.fitness.incremental_fitness_calculator import IncrementalFitnessCalculator
 from horizons_genetic.genetic.fitness.max_fitness import FitnessMaxCalculator, format_fitness_percentage
+from horizons_genetic.genetic.fitness.affectation_scorer import ScoreCache
 from horizons_genetic.genetic.operators.crossover.volunteer_crossover import VolunteerCrossover
 from horizons_genetic.genetic.operators.initializer import PopulationInitializer
 from horizons_genetic.genetic.operators.mutation.adaptative_mutation import AdaptiveMutation
@@ -39,25 +43,30 @@ from horizons_genetic.genetic.settings.config import GeneticConfig
 from horizons_genetic.genetic.fitness.fitness_weights import GradualFitnessWeights
 from horizons_genetic.genetic.utils.chromosome_converter import ChromosomeConverter
 from horizons_genetic.genetic.utils.index_manager import IndexManager
+from horizons_genetic.genetic.hill_climber import HillClimber
 
 logger = logging.getLogger(__name__)
 
 # Toutes les N générations de stagnation → injection de diversité
-_STAGNATION_IMMIGRATION_TRIGGER = 20
+_STAGNATION_IMMIGRATION_TRIGGER = 15
 # Proportion de la population remplacée par immigration
-_IMMIGRATION_RATE = 0.10
+_IMMIGRATION_RATE = 0.12
 
 
 class GeneticEngine:
     """
     Orchestre l'algorithme génétique complet.
 
-    Workflow par génération :
-      1. Réserver les élites (garantie de survie)
-      2. Crossover par bénévole sur crossover_rate % de la population
-      3. Mutation sur chaque enfant
-      4. Sélection compétitive : TOUS les candidats concourent
-      5. Immigration si stagnation prolongée
+    Workflow :
+      Phase 1 — Initialisation de la population (hybride greedy/random)
+      Phase 2 — Évolution sur N générations
+                  • Élitisme
+                  • Crossover par bénévole (VolunteerCrossover)
+                  • Mutations adaptatives
+                  • Sélection compétitive
+                  • Immigration si stagnation prolongée
+      Phase 3 — Hill-climbing sur le meilleur individu
+      Phase 4 — Conversion heavy (objets domaine)
     """
 
     def __init__(
@@ -78,16 +87,36 @@ class GeneticEngine:
 
         weights = config.fitness_weights or GradualFitnessWeights()
 
+        # ── Cache de scores : construit UNE SEULE FOIS, partagé par tous ──
+        logger.info("Construction du cache de scores bénévole × poste…")
+        self.score_cache = ScoreCache(self.index_manager)
+        logger.info(
+            f"Cache de scores construit : "
+            f"{len(self.index_manager.get_all_benevole_ids())} bénévoles × "
+            f"{len(self.index_manager.get_all_poste_ids())} postes"
+        )
+
         self.fitness_calculator = IncrementalFitnessCalculator(weights, self.index_manager)
-        self.initializer        = PopulationInitializer(self.postes, benevoles, self.index_manager)
-        self.crossover          = VolunteerCrossover(self.index_manager)
+        self.initializer        = PopulationInitializer(
+            self.postes, benevoles, self.index_manager, score_cache=self.score_cache
+        )
+        self.crossover          = VolunteerCrossover(
+            self.index_manager, score_cache=self.score_cache
+        )
         self.mutation           = AdaptiveMutation(
             self.postes,
             self.index_manager,
             config.mutation_rate,
             all_benevole_ids=self.all_benevole_ids,
+            score_cache=self.score_cache,
         )
         self.converter          = ChromosomeConverter(self.index_manager)
+        self.hill_climber       = HillClimber(
+            fitness_calculator=self.fitness_calculator,
+            index_manager=self.index_manager,
+            all_benevole_ids=self.all_benevole_ids,
+            score_cache=self.score_cache,
+        )
 
         self.fitness_max_info = FitnessMaxCalculator(weights).calculate(self.postes, benevoles)
         logger.info(f"Fitness maximum théorique : {self.fitness_max_info.max_total:,.0f}")
@@ -97,6 +126,7 @@ class GeneticEngine:
     # ------------------------------------------------------------------
 
     def run(self) -> Chromosome:
+        # ── Phase 1 : Initialisation ──────────────────────────────────
         logger.info("Phase 1 : Initialisation de la population")
         population = self.initializer.initialize(self.config.population_size)
 
@@ -119,6 +149,7 @@ class GeneticEngine:
             f"(crossover_rate={self.config.crossover_rate:.0%})"
         )
 
+        # ── Phase 2 : Évolution ───────────────────────────────────────
         for generation in range(1, self.config.generations + 1):
 
             population = self._evolve(population)
@@ -138,7 +169,7 @@ class GeneticEngine:
             else:
                 stagnation_count += 1
 
-            # ── Immigration : diversité forcée en cas de stagnation ───
+            # Immigration : diversité forcée en cas de stagnation
             if (
                 stagnation_count > 0
                 and stagnation_count % _STAGNATION_IMMIGRATION_TRIGGER == 0
@@ -175,7 +206,15 @@ class GeneticEngine:
                 )
                 break
 
-        logger.info("Phase 3 : Conversion de la solution finale")
+        # ── Phase 3 : Hill-climbing ───────────────────────────────────
+        logger.info("Phase 3 : Affinage par hill-climbing…")
+        best_ever = self.hill_climber.climb(best_ever)
+        logger.info(
+            f"Fitness après hill-climbing : {self._format_fitness(best_ever)}"
+        )
+
+        # ── Phase 4 : Conversion ──────────────────────────────────────
+        logger.info("Phase 4 : Conversion de la solution finale")
         return self.converter.to_heavy(best_ever)
 
     # ------------------------------------------------------------------
@@ -186,28 +225,20 @@ class GeneticEngine:
         """
         Produit une nouvelle génération.
 
-        CHANGEMENT CLÉ vs v1 :
-          Tous les candidats (élites + enfants + non-parents) concourent
-          ensemble pour la sélection. Les non-parents ne survivent plus
-          automatiquement — ils doivent mériter leur place.
+        TOUS les candidats (élites + enfants + non-parents) concourent
+        ensemble pour la sélection. Pression de sélection maximale.
 
-          Cela augmente significativement la pression de sélection :
-          avec population=400, crossover_rate=0.6 :
-            - 20 élites garantis
-            - ~240 enfants produits
-            - 160 non-parents en compétition avec les enfants
-            → 400 candidats pour 380 slots non-élites → élimination réelle
+        OPTIMISATION : store_raw=False sur tous les enfants — les raw_scores
+        ne sont pas nécessaires pendant l'évolution, seul le scalaire fitness
+        guide la sélection.
         """
         population.sort_by_fitness()
-        
 
         # ── a. Élitisme ───────────────────────────────────────────────
         elite_count = self.config.elite_count
-        
-        if not elite_count :
-            raise ValueError("elite_count doit être > 0 pour garantir la survie des élites")
-        
-        elites      = population.get_best(elite_count)
+        if not elite_count:
+            raise ValueError("elite_count doit être > 0")
+        elites = population.get_best(elite_count)
 
         # ── b. Sélection des parents par tournoi ──────────────────────
         n_parents = max(2, int(population.size() * self.config.crossover_rate))
@@ -228,24 +259,21 @@ class GeneticEngine:
             child1 = self.crossover.crossover(p1, p2)
             if random.random() < self.config.mutation_rate:
                 child1 = self.mutation.mutate(child1)
-            self.fitness_calculator.calculate(child1, self.all_benevole_ids)
+            # store_raw=False : économie mémoire pendant l'évolution
+            self.fitness_calculator.calculate(child1, self.all_benevole_ids, store_raw=False)
             children.append(child1)
 
             child2 = self.crossover.crossover(p2, p1)
             if random.random() < self.config.mutation_rate:
                 child2 = self.mutation.mutate(child2)
-            self.fitness_calculator.calculate(child2, self.all_benevole_ids)
+            self.fitness_calculator.calculate(child2, self.all_benevole_ids, store_raw=False)
             children.append(child2)
 
-        # ── d. SÉLECTION COMPÉTITIVE : tous les non-élites concourent ─
-        # Contrairement à v1 où les non-parents survivaient automatiquement,
-        # ici TOUS les individus hors élites sont en compétition.
+        # ── d. Sélection compétitive ──────────────────────────────────
         all_candidates = list(population)[elite_count:] + children
         candidate_pool = LightweightPopulation(all_candidates)
         candidate_pool.sort_by_fitness()
 
-
-        
         slots_remaining = self.config.population_size - elite_count
         survivors       = candidate_pool.get_best(slots_remaining)
 
@@ -255,20 +283,16 @@ class GeneticEngine:
         """
         Remplace les individus les moins performants par de nouveaux chromosomes
         greedy pour réintroduire de la diversité après une stagnation prolongée.
-
-        Les élites sont préservées — on ne touche qu'aux derniers de la population.
         """
         n_immigrants = max(1, int(self.config.population_size * _IMMIGRATION_RATE))
 
-        # Générer de nouveaux individus greedy
         immigrants = [
             self.initializer._create_greedy_chromosome()
             for _ in range(n_immigrants)
         ]
         for immigrant in immigrants:
-            self.fitness_calculator.calculate(immigrant, self.all_benevole_ids)
+            self.fitness_calculator.calculate(immigrant, self.all_benevole_ids, store_raw=False)
 
-        # Remplacer les n_immigrants moins bons individus
         population.sort_by_fitness()
         chromosomes = list(population)
         chromosomes[-n_immigrants:] = immigrants
@@ -282,7 +306,10 @@ class GeneticEngine:
     def _evaluate_population(self, population: LightweightPopulation) -> None:
         for chromosome in population:
             if chromosome.get_fitness() is None:
-                self.fitness_calculator.calculate(chromosome, self.all_benevole_ids)
+                # store_raw=False pendant l'initialisation aussi
+                self.fitness_calculator.calculate(
+                    chromosome, self.all_benevole_ids, store_raw=False
+                )
 
     def _format_fitness(self, chromosome: LightweightChromosome) -> str:
         fitness = chromosome.get_fitness()

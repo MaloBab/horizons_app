@@ -1,7 +1,7 @@
-
 from copy import deepcopy
 from horizons_core.dataclass.creneau import Creneau
 from horizons_core.utils.enums import RecruitmentType
+
 
 class Benevole():
     def __init__(
@@ -26,12 +26,39 @@ class Benevole():
         self._preferences = list(preferences)
         self._compagnons: set[Benevole] = set()
 
+        # ── OPTIMISATION : cache de disponibilité par jour ────────────────
+        # Précalculé une seule fois à la construction, évite de reconstruire
+        # un set[int] à chaque appel de is_disponible() (appelé massivement
+        # pendant l'initialisation et les validations de mutation).
+        self._disponibilites_par_jour: dict[int, frozenset[int]] = {}
+        self._build_disponibilite_cache()
+
+    # ------------------------------------------------------------------
+    # Cache interne
+    # ------------------------------------------------------------------
+
+    def _build_disponibilite_cache(self) -> None:
+        """Construit le cache {jour: frozenset[heures couvertes]}."""
+        tmp: dict[int, set[int]] = {}
+        for dispo in self._disponibilites:
+            j = dispo.get_jour()
+            heures = set(range(dispo.get_borne_inf(), dispo.get_borne_sup()))
+            if j in tmp:
+                tmp[j].update(heures)
+            else:
+                tmp[j] = heures
+        self._disponibilites_par_jour = {j: frozenset(h) for j, h in tmp.items()}
+
+    # ------------------------------------------------------------------
+    # Accesseurs
+    # ------------------------------------------------------------------
+
     def get_id(self) -> str:
         return self._id
-    
+
     def get_name(self) -> str:
         return f"{self._nom} {self._prenom}"
-    
+
     def get_nom(self) -> str:
         return self._nom
 
@@ -58,28 +85,29 @@ class Benevole():
 
     def get_compagnons(self) -> frozenset['Benevole']:
         return frozenset(self._compagnons)
-    
+
     def get_compagnons_emails(self) -> list[str]:
         return [c.get_mail() for c in self._compagnons]
-    
+
     def set_id(self, id: str) -> None:
         self._id = id
-    
+
     def add_compagnon(self, benevole: "Benevole") -> None:
         """Ajoute un compagnon."""
         self._compagnons.add(benevole)
 
     def is_disponible(self, c: Creneau) -> bool:
-        """Vérifie si le bénévole couvre entièrement le créneau donné."""
-        jour = c.get_jour()
-        heures_couvertes: set[int] = {
-            heure
-            for dispo in self._disponibilites
-            if dispo.get_jour() == jour
-            for heure in range(dispo.get_borne_inf(), dispo.get_borne_sup())
-        }
-        return all(heure in heures_couvertes for heure in range(c.get_borne_inf(), c.get_borne_sup()))
- 
+        """
+        Vérifie si le bénévole couvre entièrement le créneau donné.
+
+        OPTIMISATION : utilise le cache précalculé (_disponibilites_par_jour)
+        au lieu de reconstruire un set[int] à chaque appel.
+        """
+        heures_couvertes = self._disponibilites_par_jour.get(c.get_jour(), frozenset())
+        return all(
+            heure in heures_couvertes
+            for heure in range(c.get_borne_inf(), c.get_borne_sup())
+        )
 
     def clone(self) -> "Benevole":
         disponibilite_copy = [deepcopy(c) for c in self._disponibilites]
