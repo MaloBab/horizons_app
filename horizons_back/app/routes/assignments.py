@@ -1,11 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+# app/routes/assignments.py
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 from uuid import UUID
 from typing import List
-import asyncio
-import json
-import threading
 
 from app import models
 
@@ -20,6 +17,7 @@ from ..crud.assignment import (
 )
 
 from ..services.pipeline_service import run_pipeline
+from ..services.task_manager import create_task, update_task, get_task
 
 router = APIRouter(prefix="/assignments", tags=["assignments"])
 
@@ -93,55 +91,70 @@ def bulk_replace_assignments(
         raise HTTPException(status_code=500, detail=f"Erreur lors de la sauvegarde : {e}")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Algorithme génétique — Architecture polling (remplace l'ancien SSE)
+#
+# AVANT : GET /run-algorithm  → connexion SSE maintenue 48 minutes → timeout Cloudflare
+# APRÈS : POST /run-algorithm → répond immédiatement avec un task_id (< 50 ms)
+#         GET  /run-algorithm/{task_id} → interrogé toutes les 4s par le frontend
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/run-algorithm", status_code=202)
+def launch_algorithm(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """
+    Lance l'algorithme génétique en tâche de fond.
+    Répond immédiatement avec un task_id.
+    Le frontend doit ensuite interroger GET /run-algorithm/{task_id} toutes les 4 secondes.
+    """
+    task_id = create_task()
+    background_tasks.add_task(_run_algorithm_task, task_id, db)
+    return {"task_id": task_id}
 
 
-@router.get("/run-algorithm")
-async def run_algorithm_sse(db: Session = Depends(get_db)):
+def _run_algorithm_task(task_id: str, db: Session):
     """
-    Lance l'algorithme génétique et streame la progression en SSE.
-    Format : data: {"pct": 42, "msg": "Génération 42/100"}\n\n
-    Dernier event : data: {"pct": 100, "done": true, "assignments": [...]}\n\n
+    Tâche de fond : exécute run_pipeline et écrit la progression dans task_manager.
+    Tourne dans le thread pool de FastAPI — totalement découplé du cycle HTTP.
     """
-    queue: asyncio.Queue = asyncio.Queue()
-    loop = asyncio.get_event_loop()
+    update_task(task_id, status="running", pct=0, msg="Initialisation…")
 
     def on_progress(pct: int, msg: str, extra: dict = {}):
-        payload = {"pct": pct, "msg": msg}
-        if extra:
-            payload.update({
-                k: v for k, v in extra.items()
-                if v is not None and not isinstance(v, type(...))
-            })
-        loop.call_soon_threadsafe(queue.put_nowait, payload)
+        payload: dict = {"status": "running", "pct": pct, "msg": msg}
+        # Filtre les valeurs None et Ellipsis avant de stocker
+        payload.update({
+            k: v for k, v in extra.items()
+            if v is not None and not isinstance(v, type(...))
+        })
+        update_task(task_id, **payload)
 
-    def run_in_thread():
-        try:
-            assignments = run_pipeline(db, on_progress=on_progress)
-            result = [{"volunteer_id": str(a.volunteer_id), "job_id": a.job_id} for a in assignments]
-            loop.call_soon_threadsafe(queue.put_nowait, {"pct": 100, "done": True, "assignments": result})
-        except Exception as e:
-            loop.call_soon_threadsafe(queue.put_nowait, {"error": str(e)})
+    try:
+        assignments = run_pipeline(db, on_progress=on_progress)
+        result = [
+            {"volunteer_id": str(a.volunteer_id), "job_id": a.job_id}
+            for a in assignments
+        ]
+        update_task(
+            task_id,
+            status="done",
+            pct=100,
+            msg=f"{len(result)} affectations générées",
+            assignments=result,
+        )
+    except Exception as e:
+        update_task(task_id, status="error", error=str(e))
 
-    thread = threading.Thread(target=run_in_thread, daemon=True)
-    thread.start()
 
-    async def event_stream():
-        yield "data: {\"pct\": 0, \"msg\": \"Initialisation...\"}\n\n"
-        while True:
-            try:
-                event = await asyncio.wait_for(queue.get(), timeout=15.0)
-                yield f"data: {json.dumps(event)}\n\n"
-                
-                if event.get("done") or event.get("error"):
-                    break
-            except asyncio.TimeoutError:
-                yield ": keep-alive\n\n"
-
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
-    )
+@router.get("/run-algorithm/{task_id}")
+def get_algorithm_progress(task_id: str):
+    """
+    Endpoint de polling — interrogé toutes les 4 secondes par le frontend.
+    Retourne l'état courant de la tâche (pct, msg, status, assignments, error).
+    Chaque requête dure < 10 ms ; aucun timeout Cloudflare ne peut se déclencher.
+    """
+    task = get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Tâche introuvable ou expirée")
+    return task

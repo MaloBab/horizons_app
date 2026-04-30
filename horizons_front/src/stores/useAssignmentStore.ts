@@ -120,20 +120,6 @@ function computeVolunteerMetrics(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Calcul de la chaîne de postes nocturnes consécutifs
-//
-// Deux postes sont considérés "consécutifs" si l'un commence exactement
-// là où l'autre se termine (end_time du premier = start_time du second).
-// Un poste est "nocturne" si au moins une de ses heures est >= NIGHT_HOUR_START.
-//
-// On retourne la longueur de la plus longue chaîne de postes nocturnes
-// consécutifs sur une journée donnée.
-//
-// Exemples (NIGHT_HOUR_START = 24) :
-//   [poste 25–27]                      → 1 poste nocturne → chaîne max = 1
-//   [poste 25–26, poste 26–27]         → 2 postes consécutifs → chaîne max = 2
-//   [poste 25–26, poste 27–28]         → non consécutifs (gap 26→27) → chaîne max = 1
-//   [poste 23–26, poste 26–27]         → consécutifs, tous deux nocturnes → chaîne max = 2
-//   [poste 9–12, poste 25–26, poste 26–27] → chaîne diurne ignorée → chaîne max = 2
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface NightJobInterval {
@@ -141,24 +127,12 @@ interface NightJobInterval {
   end:   number
 }
 
-/**
- * Retourne la longueur de la plus longue chaîne de postes nocturnes
- * consécutifs (end_i === start_{i+1}) sur l'ensemble des postes fournis.
- *
- * Un poste est "nocturne" si son créneau chevauche la plage nocturne
- * (i.e. end_time > NIGHT_HOUR_START), ce qui inclut les postes qui
- * démarrent avant minuit mais se prolongent après (ex : 23h–26h).
- */
 function longestConsecutiveNightJobChain(intervals: NightJobInterval[]): number {
   if (intervals.length === 0) return 0
 
-  // On ne conserve que les postes nocturnes.
-  // Un poste est nocturne si sa fin dépasse NIGHT_HOUR_START
-  // (il couvre donc au moins une heure >= NIGHT_HOUR_START).
   const nightJobs = intervals.filter(iv => iv.end > NIGHT_HOUR_START)
   if (nightJobs.length === 0) return 0
 
-  // Tri par heure de début pour construire les chaînes de gauche à droite.
   nightJobs.sort((a, b) => a.start - b.start)
 
   let maxChain = 1
@@ -167,7 +141,6 @@ function longestConsecutiveNightJobChain(intervals: NightJobInterval[]): number 
   for (let i = 1; i < nightJobs.length; i++) {
     const prev = nightJobs[i - 1]!
     const curr = nightJobs[i]!
-    // Consécutif : le poste suivant démarre exactement où le précédent se termine.
     if (curr.start === prev.end) {
       curChain++
       if (curChain > maxChain) maxChain = curChain
@@ -179,27 +152,6 @@ function longestConsecutiveNightJobChain(intervals: NightJobInterval[]): number 
   return maxChain
 }
 
-/**
- * Calcule le score de satisfaction global d'un bénévole [0–1].
- *
- * Principe : on calcule un score par poste affecté, puis on moyenne.
- * Chaque score de poste combine trois critères pondérés, mais seuls les
- * critères *applicables* au bénévole entrent dans le calcul — les poids
- * sont renormalisés dynamiquement pour que leur somme reste égale à 1.
- *
- * Critère C (mates)       : le bénévole a-t-il au moins un mate sur ce poste ?
- *                           Ignoré si aucun mate n'est déclaré.
- * Critère D (horaire)     : qualité horaire — calculé UNE FOIS PAR JOUR.
- *                           D_nuit   : nombre de POSTES nocturnes CONSÉCUTIFS
- *                                      (se touchant bout-à-bout) dans la journée.
- *                                      Un seul poste nocturne, même long, n'est
- *                                      pas pénalisé. La pénalité s'applique dès
- *                                      que deux postes distincts s'enchaînent en
- *                                      zone nocturne.
- *                           D_charge : charge journalière totale vs limite autorisée.
- * Critère B (préférences) : la catégorie du poste correspond-elle à une
- *                           préférence déclarée ? Ignoré si aucune préférence.
- */
 function computeSatisfactionScore(
   volunteer:      Volunteer,
   myAssignments:  Assignment[],
@@ -227,26 +179,10 @@ function computeSatisfactionScore(
   }
 
   // ── Score D : calculé une fois par jour ───────────────────────────────────
-  //
-  // On collecte les intervalles (start_time, end_time) de tous les postes
-  // nocturnes du bénévole pour chaque journée, puis on calcule la plus
-  // longue chaîne de postes consécutifs (end_i === start_{i+1}).
-  //
-  // La pénalité ne s'applique qu'à partir de CONSECUTIVE_NIGHT_THRESHOLD
-  // postes enchaînés ; un seul poste isolé, même de plusieurs heures, n'est
-  // jamais pénalisé.
-  //
-  // Exemples (seuil = 2) :
-  //   1 poste 1h–3h                    → chaîne = 1 < seuil → d_nuit = 1 (aucune pénalité)
-  //   2 postes 1h–2h puis 2h–3h        → chaîne = 2 = seuil → pénalité partielle
-  //   3 postes 1h–2h, 2h–3h, 3h–4h    → chaîne = 3         → pénalité plus forte
-
-  // Collecte des intervalles nocturnes par jour
   const nightJobsPerDay: Record<number, NightJobInterval[]> = {}
   for (const assignment of myAssignments) {
     const job = allJobs.find(j => j.id === assignment.job_id)
     if (!job) continue
-    // Poste nocturne si son créneau dépasse NIGHT_HOUR_START
     if (job.slot.end_time <= NIGHT_HOUR_START) continue
     const day = job.slot.day_index
     if (!nightJobsPerDay[day]) nightJobsPerDay[day] = []
@@ -258,13 +194,10 @@ function computeSatisfactionScore(
     const day      = Number(dayStr)
     const chain    = longestConsecutiveNightJobChain(nightJobsPerDay[day] ?? [])
 
-    // Aucune pénalité sous le seuil ; pénalité croissante au-delà.
-    // Ex (seuil=2) : 1 poste → 1.0 ; 2 postes contigus → 0.5 ; 4+ → 0.0
     const d_nuit = chain < CONSECUTIVE_NIGHT_THRESHOLD
       ? 1
       : Math.max(0, 1 - (chain - CONSECUTIVE_NIGHT_THRESHOLD + 1) / CONSECUTIVE_NIGHT_THRESHOLD)
 
-    // D_charge : charge journalière totale vs limite du type de bénévole
     const excess = Math.max(0, totalHours - limit)
     const d_charge = 1 - Math.min(excess / limit, 1)
 
@@ -279,7 +212,6 @@ function computeSatisfactionScore(
     const job = allJobs.find(j => j.id === assignment.job_id)
     if (!job) continue
 
-    // Critère C — au moins un mate co-affecté sur ce poste
     const score_c = hasMates
       ? (allAssignments.some(x =>
           x.job_id       === job.id &&
@@ -288,10 +220,8 @@ function computeSatisfactionScore(
         ) ? 1 : 0)
       : 0
 
-    // Critère D — score journalier pré-calculé (identique pour tous les postes du jour)
     const score_d = d_score_per_day[job.slot.day_index] ?? 1
 
-    // Critère B — préférence déclarée pour la catégorie de ce poste
     const score_b = hasPrefs
       ? (() => {
           const pref = volunteer.preferences.find(p =>
@@ -323,12 +253,6 @@ export const useAssignmentStore = defineStore('assignment', () => {
   const saveState      = ref<SaveState>('saved')
   const jobs           = ref<JobWithRelations[]>([])
 
-  // ── Slots consommés ────────────────────────────────────────────────────────
-  // Clé : `${volunteer_id}__${day_index}__${hour_decale}`
-  // Mis à jour en mémoire uniquement lors des assign/unassign.
-  // Les disponibilités en base (VolunteerSlot) ne sont JAMAIS mutées par les
-  // affectations — elles restent la source de vérité de ce que le bénévole
-  // PEUT faire, indépendamment de ce qu'il fait.
   const _consumedSlotKeys = ref<Set<string>>(new Set())
 
   // ── Historique Undo/Redo ───────────────────────────────────────────────────
@@ -373,7 +297,6 @@ export const useAssignmentStore = defineStore('assignment', () => {
 
     const metrics = [...metricsMap.value.values()]
 
-    // Moyenne sur les bénévoles ayant au moins une affectation (score non null)
     const scoredMetrics    = metrics.filter(m => m.satisfaction_score !== null)
     const avg_satisfaction = scoredMetrics.length > 0
       ? scoredMetrics.reduce((s, m) => s + (m.satisfaction_score ?? 0), 0) / scoredMetrics.length
@@ -584,7 +507,19 @@ export const useAssignmentStore = defineStore('assignment', () => {
     }
   }
 
-  // ── Algorithme génétique ───────────────────────────────────────────────────
+  // ── Algorithme génétique — Polling (remplace l'ancien SSE) ────────────────
+  //
+  // AVANT : new EventSource('/assignments/run-algorithm')
+  //         → connexion HTTP maintenue 48 min → timeout Cloudflare garanti
+  //
+  // APRÈS : POST /assignments/run-algorithm  → reçoit { task_id } en < 50 ms
+  //         GET  /assignments/run-algorithm/{task_id}  → interrogé toutes les
+  //         POLL_INTERVAL_MS jusqu'à status "done" ou "error".
+  //         Chaque requête de polling dure < 10 ms. Cloudflare ne voit jamais
+  //         de connexion longue. L'algo continue même si l'onglet est fermé.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const POLL_INTERVAL_MS = 4_000
 
   async function runAlgorithm(): Promise<boolean> {
     algorithmPhase.value    = 'running'
@@ -596,82 +531,119 @@ export const useAssignmentStore = defineStore('assignment', () => {
     isLoading.value         = true
     error.value             = null
 
+    // 1. Lancer la tâche — répond immédiatement avec un task_id
+    let taskId: string
+    try {
+      const launchRes = await apiFetch('/assignments/run-algorithm', { method: 'POST' })
+      if (!launchRes.ok) {
+        const detail = await launchRes.text()
+        throw new Error(`Erreur ${launchRes.status} au lancement : ${detail}`)
+      }
+      const launchData = await launchRes.json()
+      taskId = launchData.task_id
+    } catch (err) {
+      algorithmPhase.value   = 'error'
+      algorithmMessage.value = err instanceof Error ? err.message : 'Erreur au lancement'
+      algorithmAlert.value   = algorithmMessage.value
+      algorithmLog.value     = [`ERREUR : ${algorithmMessage.value}`]
+      isLoading.value        = false
+      return false
+    }
+
+    // 2. Boucle de polling — chaque requête dure < 10 ms
     return new Promise((resolve) => {
-      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
-      const es = new EventSource(`${API_BASE_URL}/assignments/run-algorithm`)
+      const intervalId = setInterval(async () => {
+        try {
+          const pollRes = await apiFetch(`/assignments/run-algorithm/${taskId}`)
 
-      es.onmessage = (e) => {
-        const data = JSON.parse(e.data)
-
-        if (data.error) {
-          algorithmPhase.value   = 'error'
-          algorithmMessage.value = data.error
-          algorithmAlert.value   = data.error
-          algorithmLog.value     = [...algorithmLog.value, `ERREUR : ${data.error}`]
-          isLoading.value        = false
-          console.error("Erreur de l'algorithme : ", data.error)
-          es.close()
-          resolve(false)
-          return
-        }
-
-        if (data.pct !== undefined) algorithmProgress.value = data.pct
-        if (data.msg) {
-          algorithmMessage.value = data.msg
-          algorithmLog.value     = [...algorithmLog.value, data.msg]
-        }
-
-        if (data.postes_total !== undefined) {
-          const genMatch = data.msg?.match(/Génération (\d+)\/(\d+)/)
-          algorithmStats.value = {
-            generation:   genMatch ? `${genMatch[1]}/${genMatch[2]}` : (algorithmStats.value?.generation ?? '—'),
-            satisfaction: data.satisfaction !== undefined ? `${data.satisfaction.toFixed(1)}%` : '—',
-            postes:       `${data.postes_pourvus ?? '—'}/${data.postes_total}`,
-            benevoles:    `${data.benevoles_affectes ?? '—'}/${data.benevoles_total}`,
+          if (!pollRes.ok) {
+            // La tâche a expiré (3h) ou l'ID est invalide
+            clearInterval(intervalId)
+            algorithmPhase.value   = 'error'
+            algorithmMessage.value = `Tâche introuvable (${pollRes.status})`
+            algorithmAlert.value   = algorithmMessage.value
+            isLoading.value        = false
+            resolve(false)
+            return
           }
-        }
 
-        if (data.done) {
-          const map      = new Map<AssignmentKey, Assignment>()
-          const consumed = new Set<string>()
+          const data = await pollRes.json()
 
-          for (const item of data.assignments as { volunteer_id: string; job_id: number }[]) {
-            const key = makeAssignmentKey(item.volunteer_id, item.job_id)
-            const a: Assignment = { volunteer_id: item.volunteer_id, job_id: item.job_id, key }
-            map.set(key, a)
-            const job = jobs.value.find(j => j.id === item.job_id)
-            if (job) {
-              for (const h of hoursInSlot(job.slot.start_time, job.slot.end_time)) {
-                consumed.add(`${item.volunteer_id}__${job.slot.day_index}__${h}`)
-              }
+          // ── Mise à jour de la progression ─────────────────────────────────
+          if (data.pct !== undefined) algorithmProgress.value = data.pct
+          if (data.msg) {
+            algorithmMessage.value = data.msg
+            // N'ajoute au log que si le message est nouveau (évite le spam)
+            const lastLog = algorithmLog.value[algorithmLog.value.length - 1]
+            if (data.msg !== lastLog) {
+              algorithmLog.value = [...algorithmLog.value, data.msg]
             }
           }
 
-          assignmentsMap.value    = map
-          _consumedSlotKeys.value = consumed
-          history.value           = []
-          historyIndex.value      = -1
-          saveState.value         = 'saved'
+          // ── Métriques live (si l'algo les fournit) ────────────────────────
+          if (data.postes_total !== undefined) {
+            const genMatch = data.msg?.match(/Génération (\d+)\/(\d+)/)
+            algorithmStats.value = {
+              generation:   genMatch ? `${genMatch[1]}/${genMatch[2]}` : (algorithmStats.value?.generation ?? '—'),
+              satisfaction: data.satisfaction !== undefined ? `${data.satisfaction.toFixed(1)}%` : '—',
+              postes:       `${data.postes_pourvus ?? '—'}/${data.postes_total}`,
+              benevoles:    `${data.benevoles_affectes ?? '—'}/${data.benevoles_total}`,
+            }
+          }
 
-          algorithmPhase.value    = 'success'
-          algorithmProgress.value = 100
-          algorithmMessage.value  = `${data.assignments.length} affectations générées`
-          algorithmAlert.value    = `${data.assignments.length} affectations générées`
-          algorithmLog.value      = [...algorithmLog.value, 'Affectations persistées en base']
-          isLoading.value         = false
-          es.close()
-          resolve(true)
+          // ── Erreur métier remontée par l'algo ─────────────────────────────
+          if (data.status === 'error' || data.error) {
+            clearInterval(intervalId)
+            algorithmPhase.value   = 'error'
+            algorithmMessage.value = data.error ?? 'Erreur inconnue'
+            algorithmAlert.value   = algorithmMessage.value
+            algorithmLog.value     = [...algorithmLog.value, `ERREUR : ${algorithmMessage.value}`]
+            isLoading.value        = false
+            console.error("Erreur de l'algorithme :", data.error)
+            resolve(false)
+            return
+          }
+
+          // ── Succès ────────────────────────────────────────────────────────
+          if (data.status === 'done') {
+            clearInterval(intervalId)
+
+            const map      = new Map<AssignmentKey, Assignment>()
+            const consumed = new Set<string>()
+
+            for (const item of data.assignments as { volunteer_id: string; job_id: number }[]) {
+              const key = makeAssignmentKey(item.volunteer_id, item.job_id)
+              const a: Assignment = { volunteer_id: item.volunteer_id, job_id: item.job_id, key }
+              map.set(key, a)
+              const job = jobs.value.find(j => j.id === item.job_id)
+              if (job) {
+                for (const h of hoursInSlot(job.slot.start_time, job.slot.end_time)) {
+                  consumed.add(`${item.volunteer_id}__${job.slot.day_index}__${h}`)
+                }
+              }
+            }
+
+            assignmentsMap.value    = map
+            _consumedSlotKeys.value = consumed
+            history.value           = []
+            historyIndex.value      = -1
+            saveState.value         = 'saved'
+
+            algorithmPhase.value    = 'success'
+            algorithmProgress.value = 100
+            algorithmMessage.value  = `${data.assignments.length} affectations générées`
+            algorithmAlert.value    = `${data.assignments.length} affectations générées`
+            algorithmLog.value      = [...algorithmLog.value, 'Affectations persistées en base']
+            isLoading.value         = false
+            resolve(true)
+          }
+
+        } catch (err) {
+          // Erreur réseau ponctuelle — on laisse la boucle continuer
+          // (l'algo tourne toujours côté serveur ; on réessaiera dans 4s)
+          console.warn('Erreur de polling (réessai dans 4s) :', err)
         }
-      }
-
-      es.onerror = () => {
-        algorithmPhase.value   = 'error'
-        algorithmMessage.value = 'Connexion SSE perdue'
-        algorithmAlert.value   = 'La connexion au serveur a été interrompue.'
-        isLoading.value        = false
-        es.close()
-        resolve(false)
-      }
+      }, POLL_INTERVAL_MS)
     })
   }
 
