@@ -1,36 +1,5 @@
 """
-Recherche locale par hill-climbing post-génétique.
-
-RÔLE :
-  L'algorithme génétique converge vers un bon voisinage de l'espace de
-  solutions, mais s'arrête rarement exactement sur un optimum local.
-  Ce module affine la meilleure solution trouvée par le GA en tentant
-  des améliorations individuelles jusqu'à stagnation complète.
-
-ALGORITHME — Hill-Climbing par perturbations unitaires :
-
-  Tant qu'une amélioration est possible :
-    Pour chaque type de perturbation (swap, fill, shift, preference) :
-      Générer un candidat voisin via la perturbation
-      Si fitness(candidat) > fitness(courant) :
-        courant ← candidat
-        amélioration trouvée → recommencer depuis le début
-
-  La recherche s'arrête quand aucune des perturbations ne produit
-  d'amélioration lors d'un passage complet sur toutes les stratégies.
-
-PARAMÈTRES :
-  max_iterations : nombre maximum de passes (garde-fou)
-  attempts_per_move : combien de candidats tenter par type de perturbation
-                      avant de conclure qu'il n'y a pas d'amélioration
-
-MÉMOIRE :
-  On travaille sur un seul chromosome léger à la fois — impact mémoire
-  négligeable, aucune copie de population.
-
-INTÉGRATION :
-  Appelé par GeneticEngine.run() après la boucle évolutive principale,
-  sur best_ever avant la conversion heavy.
+Recherche locale par hill-climbing post-génétique — v2.
 """
 import logging
 import random
@@ -51,10 +20,8 @@ logger = logging.getLogger(__name__)
 
 class HillClimber:
     """
-    Affine un chromosome par perturbations unitaires successives.
-
-    Chaque perturbation est évaluée par le calculateur de fitness complet.
-    La recherche s'arrête quand plus aucune amélioration n'est trouvée.
+    Affine un chromosome par perturbations unitaires guidées et exhaustives.
+    Ne s'arrête qu'après max_no_improve passes consécutives sans amélioration.
     """
 
     def __init__(
@@ -63,8 +30,10 @@ class HillClimber:
         index_manager:      IndexManager,
         all_benevole_ids:   set[int],
         score_cache:        ScoreCache,
-        max_iterations:     int = 200,
-        attempts_per_move:  int = 15,
+        max_iterations:     int = 200,    # garde-fou absolu
+        attempts_per_move:  int = 50,     # v2 : 50 au lieu de 15
+        max_no_improve:     int = 5,      # v2 : 5 passes sans amélioration → arrêt
+        restart_every:      int = 3,      # v2 : perturbation forte tous les N échecs
     ):
         self.fitness_calculator = fitness_calculator
         self.index_manager      = index_manager
@@ -72,6 +41,40 @@ class HillClimber:
         self.score_cache        = score_cache
         self.max_iterations     = max_iterations
         self.attempts_per_move  = attempts_per_move
+        self.max_no_improve     = max_no_improve
+        self.restart_every      = restart_every
+
+        # Pré-calcul des index de disponibilité (partagé avec AdaptiveMutation)
+        self._eligible_postes:    dict[int, list[int]] = {}
+        self._eligible_benevoles: dict[int, list[int]] = {}
+        self._build_eligibility()
+
+    def _build_eligibility(self) -> None:
+        all_b_ids = list(self.all_benevole_ids)
+        all_p_ids = self.index_manager.get_all_poste_ids()
+
+        for b_id in all_b_ids:
+            bv = self.index_manager.id_to_benevole(b_id)
+            if bv is None:
+                self._eligible_postes[b_id] = []
+                continue
+            self._eligible_postes[b_id] = [
+                p_id for p_id in all_p_ids
+                if self.index_manager.id_to_poste(p_id) is not None
+                and bv.is_disponible(self.index_manager.id_to_poste(p_id).get_horaire())
+            ]
+
+        for p_id in all_p_ids:
+            p = self.index_manager.id_to_poste(p_id)
+            if p is None:
+                self._eligible_benevoles[p_id] = []
+                continue
+            c = p.get_horaire()
+            self._eligible_benevoles[p_id] = [
+                b_id for b_id in all_b_ids
+                if (benev:= self.index_manager.id_to_benevole(b_id)) is not None
+                and benev.is_disponible(c)
+            ]
 
     # ------------------------------------------------------------------
     # Point d'entrée public
@@ -79,50 +82,66 @@ class HillClimber:
 
     def climb(self, chromosome: LightweightChromosome) -> LightweightChromosome:
         """
-        Affine le chromosome par hill-climbing.
-
-        Args:
-            chromosome: Meilleur individu issu du GA (doit avoir un fitness calculé).
+        Affine le chromosome par hill-climbing multi-passes.
 
         Returns:
-            Chromosome amélioré (ou identique si déjà à l'optimum local).
+            Le meilleur chromosome trouvé (≥ chromosome initial).
         """
         current       = chromosome
         current_fit   = current.get_fitness() or 0.0
         initial_fit   = current_fit
         n_improvements = 0
-        iteration = -1
+        no_improve_streak = 0
+        iteration     = 0
 
         for iteration in range(self.max_iterations):
             improved = False
 
-            # Essayer chaque stratégie de perturbation
             for move_fn in [
                 self._try_swap,
                 self._try_fill,
                 self._try_shift,
                 self._try_preference_swap,
             ]:
-                candidate = move_fn(current)
-                if candidate is current:
-                    continue  # perturbation n'a rien produit
+                for _ in range(self.attempts_per_move):
+                    candidate = move_fn(current)
+                    if candidate is current:
+                        continue
 
-                # Évaluer le candidat (sans stocker les raw_scores)
-                cand_fit = self.fitness_calculator.calculate(
-                    candidate, self.all_benevole_ids, store_raw=False
-                )
+                    cand_fit = self.fitness_calculator.calculate(
+                        candidate, self.all_benevole_ids, store_raw=False
+                    )
 
-                if cand_fit > current_fit:
-                    current     = candidate
-                    current_fit = cand_fit
-                    improved    = True
-                    n_improvements += 1
-                    # Recommencer immédiatement avec le nouveau courant
+                    if cand_fit > current_fit:
+                        current       = candidate
+                        current_fit   = cand_fit
+                        improved      = True
+                        n_improvements += 1
+                        break  # Redémarrer depuis swap avec le nouvel état
+
+                if improved:
+                    break   # Recommencer la passe depuis le début
+
+            if improved:
+                no_improve_streak = 0
+            else:
+                no_improve_streak += 1
+
+                # Restart aléatoire pour sortir des bassins locaux
+                if no_improve_streak % self.restart_every == 0 and no_improve_streak > 0:
+                    perturbed     = self._random_perturbation(current)
+                    perturbed_fit = self.fitness_calculator.calculate(
+                        perturbed, self.all_benevole_ids, store_raw=False
+                    )
+                    if perturbed_fit > current_fit:
+                        current     = perturbed
+                        current_fit = perturbed_fit
+                        n_improvements += 1
+                        no_improve_streak = 0
+                    # Sinon on garde current (best_ever maintenu implicitement)
+
+                if no_improve_streak >= self.max_no_improve:
                     break
-
-            if not improved:
-                # Aucune perturbation n'a amélioré le fitness → optimum local atteint
-                break
 
         gain = current_fit - initial_fit
         logger.info(
@@ -132,18 +151,14 @@ class HillClimber:
 
         # Stocker les raw_scores sur le meilleur individu final
         self.fitness_calculator.calculate(current, self.all_benevole_ids, store_raw=True)
-
         return current
 
     # ------------------------------------------------------------------
-    # Perturbations unitaires
+    # Perturbations
     # ------------------------------------------------------------------
 
     def _try_swap(self, chromosome: LightweightChromosome) -> LightweightChromosome:
-        """
-        Tente un échange de deux bénévoles entre deux postes.
-        Retourne le chromosome original si aucun swap valide n'est trouvé.
-        """
+        """Swap guidé par l'index d'éligibilité."""
         all_ids = list(chromosome.poste_to_benevoles.keys())
         if len(all_ids) < 2:
             return chromosome
@@ -151,20 +166,37 @@ class HillClimber:
         daily_hours = compute_daily_hours(chromosome.poste_to_benevoles, self.index_manager)
         assignments = chromosome.get_benevole_assignments()
 
-        for _ in range(self.attempts_per_move):
-            p1_id = random.choice(all_ids)
-            p2_id = random.choice([p for p in all_ids if p != p1_id])
+        # Tirer un poste source non vide
+        occupied = [p for p in all_ids if any(b >= 0 for b in chromosome.poste_to_benevoles[p])]
+        if not occupied:
+            return chromosome
 
-            bvs1  = chromosome.poste_to_benevoles[p1_id]
-            bvs2  = chromosome.poste_to_benevoles[p2_id]
+        p1_id = random.choice(occupied)
+        bvs1  = chromosome.poste_to_benevoles[p1_id]
+        valid = [b for b in bvs1 if b >= 0]
+        if not valid:
+            return chromosome
 
-            valid1 = [b for b in bvs1 if b >= 0]
-            if not valid1:
-                continue
+        b1_id = random.choice(valid)
+        idx1  = bvs1.index(b1_id)
 
-            b1_id = random.choice(valid1)
-            idx1  = bvs1.index(b1_id)
-            idx2  = random.randint(0, len(bvs2) - 1)
+        # Postes candidats pour p2 : b1 doit être disponible (index statique)
+        b1_elig = set(self._eligible_postes.get(b1_id, []))
+        elig_p1_bvs = set(self._eligible_benevoles.get(p1_id, []))
+
+        candidates_p2 = [
+            p_id for p_id in all_ids
+            if p_id != p1_id
+            and p_id in b1_elig
+        ]
+
+        if not candidates_p2:
+            return chromosome
+
+        random.shuffle(candidates_p2)
+        for p2_id in candidates_p2[:self.attempts_per_move]:
+            bvs2 = chromosome.poste_to_benevoles[p2_id]
+            idx2 = random.randint(0, len(bvs2) - 1)
             b2_id = bvs2[idx2]
 
             if self._swap_valid(chromosome, b1_id, p1_id, b2_id, p2_id, daily_hours, assignments):
@@ -176,30 +208,24 @@ class HillClimber:
         return chromosome
 
     def _try_fill(self, chromosome: LightweightChromosome) -> LightweightChromosome:
-        """
-        Tente de combler un slot vide avec le meilleur bénévole disponible.
-        """
+        """Fill guidé : trie les candidats par score dans l'index d'éligibilité."""
         empty_slots = [
             (p_id, i)
             for p_id, bvs in chromosome.poste_to_benevoles.items()
-            for i, b in enumerate(bvs)
-            if b < 0
+            for i, b in enumerate(bvs) if b < 0
         ]
         if not empty_slots:
             return chromosome
 
         daily_hours = compute_daily_hours(chromosome.poste_to_benevoles, self.index_manager)
         assignments = chromosome.get_benevole_assignments()
-        all_b_ids   = list(self.all_benevole_ids)
 
-        # Choisir le slot vide avec le meilleur candidat potentiel
         random.shuffle(empty_slots)
         sample = empty_slots[:self.attempts_per_move]
 
         for poste_id, slot in sample:
-            # Trier les bénévoles par score (via cache)
             candidates = sorted(
-                all_b_ids,
+                self._eligible_benevoles.get(poste_id, []),
                 key=lambda b: self.score_cache.get(b, poste_id),
                 reverse=True,
             )
@@ -212,9 +238,6 @@ class HillClimber:
                 if benevole is None or poste is None:
                     continue
                 creneau = poste.get_horaire()
-                if not benevole.is_disponible(creneau):
-                    continue
-                # Vérifier les conflits horaires
                 conflict = any(
                     creneau.is_incompatible(self.index_manager.id_to_poste(op).get_horaire())
                     for op in assignments.get(b_id, [])
@@ -231,10 +254,7 @@ class HillClimber:
         return chromosome
 
     def _try_shift(self, chromosome: LightweightChromosome) -> LightweightChromosome:
-        """
-        Déplace un bénévole vers un poste du même pôle avec un meilleur score.
-        Cible les bénévoles mal placés par rapport à leurs préférences.
-        """
+        """Déplace un bénévole vers un poste avec un meilleur score."""
         all_ids = list(chromosome.poste_to_benevoles.keys())
         daily_hours = compute_daily_hours(chromosome.poste_to_benevoles, self.index_manager)
         assignments = chromosome.get_benevole_assignments()
@@ -250,19 +270,19 @@ class HillClimber:
             idx1   = bvs1.index(b_id)
             score1 = self.score_cache.get(b_id, p1_id)
 
-            # Chercher un poste qui serait mieux pour ce bénévole
-            better = [
-                p2_id for p2_id in all_ids
-                if p2_id != p1_id
-                and self.score_cache.get(b_id, p2_id) > score1
-            ]
+            # Chercher dans l'index d'éligibilité les postes avec meilleur score
+            b_elig = self._eligible_postes.get(b_id, [])
+            better = [p for p in b_elig if p != p1_id and self.score_cache.get(b_id, p) > score1]
             if not better:
                 continue
 
             p2_id  = random.choice(better)
-            bvs2   = chromosome.poste_to_benevoles[p2_id]
-            idx2   = random.randint(0, len(bvs2) - 1)
-            b2_id  = bvs2[idx2]
+            bvs2   = chromosome.poste_to_benevoles.get(p2_id, [])
+            if not bvs2:
+                continue
+
+            idx2  = random.randint(0, len(bvs2) - 1)
+            b2_id = bvs2[idx2]
 
             if self._swap_valid(chromosome, b_id, p1_id, b2_id, p2_id, daily_hours, assignments):
                 mutated = chromosome.clone()
@@ -273,15 +293,11 @@ class HillClimber:
         return chromosome
 
     def _try_preference_swap(self, chromosome: LightweightChromosome) -> LightweightChromosome:
-        """
-        Échange deux bénévoles dans la même catégorie de pôle pour améliorer
-        l'adéquation préférences ↔ poste.
-        """
+        """Swap dans la même catégorie pour améliorer les préférences."""
         all_ids = list(chromosome.poste_to_benevoles.keys())
         daily_hours = compute_daily_hours(chromosome.poste_to_benevoles, self.index_manager)
         assignments = chromosome.get_benevole_assignments()
 
-        # Regrouper les postes par pôle
         by_pole: dict[int, list[int]] = {}
         for p_id in all_ids:
             poste = self.index_manager.id_to_poste(p_id)
@@ -294,7 +310,7 @@ class HillClimber:
             return chromosome
 
         for _ in range(self.attempts_per_move):
-            pole_id  = random.choice(eligible_poles)
+            pole_id   = random.choice(eligible_poles)
             p1_id, p2_id = random.sample(by_pole[pole_id], 2)
 
             bvs1 = chromosome.poste_to_benevoles[p1_id]
@@ -315,8 +331,38 @@ class HillClimber:
 
         return chromosome
 
+    def _random_perturbation(self, chromosome: LightweightChromosome) -> LightweightChromosome:
+        """
+        Perturbation forte aléatoire (3 swaps successifs) pour sortir d'un bassin local.
+        Utilisée lors des restarts.
+        """
+        mutated = chromosome.clone()
+        all_ids = list(mutated.poste_to_benevoles.keys())
+
+        for _ in range(3):
+            if len(all_ids) < 2:
+                break
+            p1_id, p2_id = random.sample(all_ids, 2)
+            bvs1 = mutated.poste_to_benevoles[p1_id]
+            bvs2 = mutated.poste_to_benevoles[p2_id]
+            if not bvs1 or not bvs2:
+                continue
+            idx1 = random.randint(0, len(bvs1) - 1)
+            idx2 = random.randint(0, len(bvs2) - 1)
+
+            daily_hours = compute_daily_hours(mutated.poste_to_benevoles, self.index_manager)
+            assignments = mutated.get_benevole_assignments()
+
+            if self._swap_valid(mutated, bvs1[idx1], p1_id, bvs2[idx2], p2_id, daily_hours, assignments):
+                b1_id = bvs1[idx1]
+                b2_id = bvs2[idx2]
+                mutated.poste_to_benevoles[p1_id][idx1] = b2_id
+                mutated.poste_to_benevoles[p2_id][idx2] = b1_id
+
+        return mutated
+
     # ------------------------------------------------------------------
-    # Validation interne
+    # Validation
     # ------------------------------------------------------------------
 
     def _swap_valid(
@@ -329,7 +375,6 @@ class HillClimber:
         daily_hours: dict[int, dict[int, float]],
         assignments: dict[int, list[int]],
     ) -> bool:
-        """Vérifie que l'échange (b1 ↔ b2) entre poste1 et poste2 est valide."""
         p1 = self.index_manager.id_to_poste(poste1_id)
         p2 = self.index_manager.id_to_poste(poste2_id)
         if p1 is None or p2 is None:
@@ -346,9 +391,7 @@ class HillClimber:
             for other_pid in assignments.get(b_id, []):
                 if other_pid == old_pid:
                     continue
-                if new_c.is_incompatible(
-                    self.index_manager.id_to_poste(other_pid).get_horaire()
-                ):
+                if new_c.is_incompatible(self.index_manager.id_to_poste(other_pid).get_horaire()):
                     return False
             old_c = self.index_manager.id_to_poste(old_pid).get_horaire()
             sim   = {d: h for d, h in daily_hours.get(b_id, {}).items()}
