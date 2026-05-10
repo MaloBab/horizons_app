@@ -507,18 +507,6 @@ export const useAssignmentStore = defineStore('assignment', () => {
     }
   }
 
-  // ── Algorithme génétique — Polling (remplace l'ancien SSE) ────────────────
-  //
-  // AVANT : new EventSource('/assignments/run-algorithm')
-  //         → connexion HTTP maintenue 48 min → timeout Cloudflare garanti
-  //
-  // APRÈS : POST /assignments/run-algorithm  → reçoit { task_id } en < 50 ms
-  //         GET  /assignments/run-algorithm/{task_id}  → interrogé toutes les
-  //         POLL_INTERVAL_MS jusqu'à status "done" ou "error".
-  //         Chaque requête de polling dure < 10 ms. Cloudflare ne voit jamais
-  //         de connexion longue. L'algo continue même si l'onglet est fermé.
-  // ─────────────────────────────────────────────────────────────────────────
-
   const POLL_INTERVAL_MS = 4_000
 
   async function runAlgorithm(): Promise<boolean> {

@@ -49,7 +49,7 @@ class FitnessWeights:
 
     # Seuil : nombre de paires consécutives à partir duquel on pénalise
     # (1 paire = 2 créneaux qui se touchent, 2 paires = 3 créneaux, etc.)
-    seuil_consecutifs: int = 2  # 1 ou 2 paires consécutives = OK, 3+ = pénalité
+    seuil_consecutifs: int = 1  # 1 ou 2 paires consécutives = OK, 3+ = pénalité
 
     # ── Contrainte dure : violation horaire journalière ───────────────
     # Pénalité par heure d'excès au-delà de la limite journalière.
