@@ -1,8 +1,7 @@
 from sqlalchemy.orm import Session
 from uuid import UUID
-from typing import List
+from typing import List, cast
 from .. import models, schemas
-import random
 
 def create_volunteer(db: Session, volunteer: schemas.VolunteerCreate):
     db_volunteer = models.volunteer.Volunteer(
@@ -83,14 +82,22 @@ def resolve_mates(db: Session, volunteer_email: str, mate_emails: List[str]) -> 
     volunteer = db.query(models.volunteer.Volunteer).filter_by(email=volunteer_email).first()
     if not volunteer:
         return
+
+    seen_mate_ids: set[UUID] = set()
+
     for mate_email in mate_emails:
-        mate = db.query(models.volunteer.Volunteer).filter_by(email=mate_email).first()
-        if not mate:
+        if mate_email == volunteer_email:
             continue
+        mate = db.query(models.volunteer.Volunteer).filter_by(email=mate_email).first()
+        if not mate or mate.id in seen_mate_ids:
+            continue
+        seen_mate_ids.add(cast(UUID, mate.id))
+
         already_exists = db.query(models.volunteer.VolunteerMate).filter_by(
             volunteer_id=volunteer.id, mate_id=mate.id
         ).first()
         if not already_exists:
             db.add(models.volunteer.VolunteerMate(volunteer_id=volunteer.id, mate_id=mate.id))
+
     db.commit()
     
