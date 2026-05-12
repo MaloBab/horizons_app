@@ -146,7 +146,20 @@ def import_benevoles_from_file(filepath: str, db: Session) -> ImportReport:
                 mate_emails_map[benevole.get_mail()] = mate_emails
 
         # ── 4. Résolution des affinités ───────────────────────────────────────
+        volunteer_map: dict[str, models.volunteer.Volunteer] = {
+            str(v.email): v for v in persisted_volunteers
+        }
+
         for volunteer_email, mates in mate_emails_map.items():
+            # Résoudre l'email vers un nom pour le log
+            vol = volunteer_map.get(volunteer_email)
+            vol_name = f"{vol.first_name} {vol.last_name}" if vol else volunteer_email
+
+            for mate_email in mates:
+                mate = volunteer_map.get(mate_email)
+                mate_name = f"{mate.first_name} {mate.last_name}" if mate else mate_email
+                print(f"[RESOLVE_MATES] {vol_name} → {mate_name}")
+
             resolve_mates(db, volunteer_email, mates)
 
         # ── 4a. Commit ────────────────────────────────────────────────────────
