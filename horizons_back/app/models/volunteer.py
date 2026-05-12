@@ -12,7 +12,7 @@ class Volunteer(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"), index=True)
     first_name = Column(String, nullable=False)
     last_name = Column(String, nullable=False)
-    email = Column(String, unique=True)
+    email = Column(String, unique=False)
     address = Column(String, nullable=False)
     phone_number = Column(String, nullable=False)
     volunteer_type = Column(
