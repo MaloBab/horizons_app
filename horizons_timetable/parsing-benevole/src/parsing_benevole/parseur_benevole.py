@@ -46,8 +46,8 @@ class ParseurBenevole:
         compagnon_matcher: Optional[ICompagnonMatcher] = None,
         preference_extractor: Optional[IPreferenceExtractor] = None,
         header_row: int = DEFAULT_HEADER_ROW,
-        max_empty_rows: int = DEFAULT_MAX_EMPTY_ROWS,
-    ):
+        max_empty_rows: int = DEFAULT_MAX_EMPTY_ROWS):
+        
         self._schema         = schema or SchemaConfiguration()
         self._max_empty_rows = max_empty_rows
 
@@ -140,14 +140,11 @@ class ParseurBenevole:
                     result.add_diagnostic(ParseError(
                         ligne=ligne,
                         colonne='email',
-                        message=(
-                            f"Email '{email}' déjà présent dans le fichier — "
-                            f"ce bénévole sera ignoré pour éviter un conflit en base"
-                        ),
-                        severity=ErrorSeverity.ERROR,
+                        message=(f"Email '{email}' déjà présent dans le fichier"),
+                        severity=ErrorSeverity.WARNING,
                     ))
-                    return result  # On arrête le traitement de cette ligne
-                seen_emails.add(email_lower)
+                else:
+                    seen_emails.add(email_lower)
 
                 # Format invalide (pas de @ ou pas de .)
                 if not TextUtils.is_valid_email(email):
