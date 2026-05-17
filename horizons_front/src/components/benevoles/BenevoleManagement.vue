@@ -5,16 +5,9 @@
         <h2 class="text-4xl font-bold mb-2 bg-gray-400 bg-clip-text text-transparent">
           Gestion des Bénévoles
         </h2>
-        <div class="flex items-center gap-2">
-          <!-- Bouton création manuelle -->
-          <button
-            @click="showCreateModal = true"
-            class="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 border border-cyan-500 rounded-lg text-sm text-white font-medium transition-colors"
-          >
-            <UserPlus class="w-4 h-4" />
-            Nouveau bénévole
-          </button>
 
+        <!-- Boutons groupés à droite -->
+        <div class="flex items-center gap-2">
           <!-- Bouton préférences -->
           <button
             @click="showPreferencesModal = true"
@@ -22,6 +15,15 @@
           >
             <Settings class="w-4 h-4" />
             Préférences & Pôles
+          </button>
+
+          <!-- Bouton création manuelle -->
+          <button
+            @click="showCreateModal = true"
+            class="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 border border-cyan-500 rounded-lg text-sm text-white font-medium transition-colors"
+          >
+            <UserPlus class="w-4 h-4" />
+            Nouveau bénévole
           </button>
         </div>
       </div>
@@ -192,7 +194,6 @@ const handleDeleteAll = async () => {
 
 const handleCreated = async (id: string) => {
   showToast('Bénévole créé avec succès', 'success')
-  // On ouvre directement le détail du bénévole créé
   selectVolunteer(id)
 }
 </script>
