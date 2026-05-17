@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, EmailStr,Field
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from uuid import UUID
@@ -7,7 +7,7 @@ from typing import List
 
 from ..database import get_db
 from ..models.volunteer import Volunteer
-from ..crud.volunteer import delete_all_volunteers, get_volunteer, get_volunteers, delete_volunteer
+from ..crud.volunteer import create_volunteer, delete_all_volunteers, get_volunteer, get_volunteers, delete_volunteer
 from ..crud.volunteer_links import (
     add_slot_to_volunteer,
     remove_slot_from_volunteer,
@@ -27,6 +27,12 @@ router = APIRouter(prefix="/volunteers", tags=["volunteers"])
 @router.get("/", response_model=List[schemas.VolunteerResponse])
 def list_volunteers(skip: int = 0, db: Session = Depends(get_db)):
     return get_volunteers(db, skip=skip)
+
+
+@router.post("/", response_model=schemas.VolunteerResponse, status_code=201)
+def create_volunteer_route(payload: schemas.VolunteerCreate, db: Session = Depends(get_db)):
+    """Crée un bénévole manuellement (hors import Excel)."""
+    return create_volunteer(db, payload)
 
 
 @router.get("/{volunteer_id}", response_model=schemas.VolunteerResponse)
@@ -92,6 +98,7 @@ def update_phone(volunteer_id: UUID, body: PhoneUpdate, db: Session = Depends(ge
     db.commit()
     db.refresh(volunteer)
     return volunteer
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Disponibilités — ajout par plage horaire, découpée en créneaux d'1h

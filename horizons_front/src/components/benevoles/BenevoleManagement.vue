@@ -5,12 +5,25 @@
         <h2 class="text-4xl font-bold mb-2 bg-gray-400 bg-clip-text text-transparent">
           Gestion des Bénévoles
         </h2>
-        <button
-          @click="showPreferencesModal = true"
-          class="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded-lg text-sm text-slate-300 hover:text-white transition-colors">
-          <Settings class="w-4 h-4" />
-          Préférences & Pôles
-        </button>
+        <div class="flex items-center gap-2">
+          <!-- Bouton création manuelle -->
+          <button
+            @click="showCreateModal = true"
+            class="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 border border-cyan-500 rounded-lg text-sm text-white font-medium transition-colors"
+          >
+            <UserPlus class="w-4 h-4" />
+            Nouveau bénévole
+          </button>
+
+          <!-- Bouton préférences -->
+          <button
+            @click="showPreferencesModal = true"
+            class="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded-lg text-sm text-slate-300 hover:text-white transition-colors"
+          >
+            <Settings class="w-4 h-4" />
+            Préférences & Pôles
+          </button>
+        </div>
       </div>
 
       <StatsCards :stats="stats" class="mb-8" />
@@ -32,11 +45,19 @@
         @delete="handleDelete"
         class="mb-8" />
 
+      <!-- Modal détail -->
       <BenevoleDetailModal
         v-if="selectedVolunteer"
         :volunteer="selectedVolunteer"
         :all-volunteers="volunteers"
         @close="selectedVolunteer = null" />
+
+      <!-- Modal création manuelle -->
+      <BenevoleCreateModal
+        v-if="showCreateModal"
+        @close="showCreateModal = false"
+        @created="handleCreated"
+      />
 
       <PreferencesModal
         v-if="showPreferencesModal"
@@ -70,12 +91,13 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Settings } from 'lucide-vue-next'
+import { Settings, UserPlus } from 'lucide-vue-next'
 import { useBenevoles } from '../../composables/useBenevoles'
 import StatsCards from './StatsCards.vue'
 import ActionBar from '../shared/ActionBar.vue'
 import BenevolesTable from './BenevolesTable.vue'
 import BenevoleDetailModal from './BenevoleDetailModal.vue'
+import BenevoleCreateModal from './BenevoleCreateModal.vue'
 import PreferencesModal from './preferencesModal/PreferencesModal.vue'
 import ConfirmDialog from '../shared/ConfirmDialog.vue'
 import ImportReportModal from '../shared/ImportReportModal.vue'
@@ -106,6 +128,7 @@ const {
 const showDeleteAllConfirm = ref(false)
 const showPreferencesModal = ref(false)
 const showImportReport     = ref(false)
+const showCreateModal      = ref(false)
 const importReport         = ref<VolunteerImportReport | null>(null)
 
 onMounted(async () => {
@@ -124,7 +147,6 @@ const handleImport = async (file: File) => {
     return
   }
 
-  // Le rapport vient directement du back — aucune reconstruction manuelle
   importReport.value     = result.report
   showImportReport.value = true
 
@@ -166,6 +188,12 @@ const handleDeleteAll = async () => {
     showDeleteAllConfirm.value = false
     showToast((e as Error).message, 'error')
   }
+}
+
+const handleCreated = async (id: string) => {
+  showToast('Bénévole créé avec succès', 'success')
+  // On ouvre directement le détail du bénévole créé
+  selectVolunteer(id)
 }
 </script>
 

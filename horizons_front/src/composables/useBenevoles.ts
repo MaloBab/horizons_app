@@ -16,6 +16,18 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   return res.json()
 }
 
+// ── Payload de création manuelle ─────────────────────────────────────────────
+export interface VolunteerCreatePayload {
+  first_name:     string
+  last_name:      string
+  email:          string
+  address:        string
+  phone_number:   string
+  volunteer_type: 'Normal' | 'Specialise'
+  preference_ids: number[]
+  slot_ids:       number[]
+}
+
 // ── État partagé (singleton) ──────────────────────────────────────────────────
 const volunteers        = ref<Volunteer[]>([])
 const isLoading         = ref(false)
@@ -53,6 +65,16 @@ export const useBenevoles = () => {
   }
 
   const getVolunteerById = (id: string) => volunteers.value.find(v => v.id === id)
+
+  // ── Création manuelle ───────────────────────────────────────────────────────
+  const createVolunteer = async (payload: VolunteerCreatePayload): Promise<Volunteer> => {
+    const created = await api<Volunteer>('/volunteers/', {
+      method: 'POST',
+      body:   JSON.stringify(payload),
+    })
+    volunteers.value = [...volunteers.value, created]
+    return created
+  }
 
   const deleteVolunteer = async (id: string) => {
     await api(`/volunteers/${id}`, { method: 'DELETE' })
@@ -136,49 +158,46 @@ export const useBenevoles = () => {
     return updated
   }
 
-  // ── Import ────────────────────────────────────────────────────────────────
-  // Retourne le rapport complet tel que reçu du back, sans reconstruction manuelle.
+  // ── Import ──────────────────────────────────────────────────────────────────
+  const importFromExcel = async (file: File): Promise<{
+    success:  boolean
+    message:  string
+    report:   VolunteerImportReport | null
+  }> => {
+    isLoading.value = true
+    try {
+      const form = new FormData()
+      form.append('file', file)
 
-const importFromExcel = async (file: File): Promise<{
-  success:  boolean
-  message:  string
-  report:   VolunteerImportReport | null
-}> => {
-  isLoading.value = true
-  try {
-    const form = new FormData()
-    form.append('file', file)
+      const res = await apiFetch(`/volunteers/import`, { method: 'POST', body: form })
 
-    const res = await apiFetch(`/volunteers/import`, { method: 'POST', body: form })
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({ detail: res.statusText }))
+        console.log('422 detail:', JSON.stringify(detail, null, 2))
+        const message = Array.isArray(detail.detail)
+          ? detail.detail.map((e: any) => e.msg).join(', ')
+          : detail.detail ?? `Erreur ${res.status}`
+        return { success: false, message, report: null }
+      }
 
-    if (!res.ok) {
-      const detail = await res.json().catch(() => ({ detail: res.statusText }))
-      console.log('422 detail:', JSON.stringify(detail, null, 2))
-      const message = Array.isArray(detail.detail)
-        ? detail.detail.map((e: any) => e.msg).join(', ')
-        : detail.detail ?? `Erreur ${res.status}`
-      return { success: false, message, report: null }
+      const report: VolunteerImportReport = await res.json()
+
+      await fetchVolunteers()
+
+      const hasErrors   = report.total_errors > 0
+      const hasWarnings = report.total_warnings > 0
+      let message = `${report.total_persisted} bénévole(s) importé(s) avec succès`
+      if (hasErrors)   message += ` — ${report.total_errors} erreur(s)`
+      if (hasWarnings) message += ` — ${report.total_warnings} avertissement(s)`
+
+      return { success: true, message, report }
+
+    } catch (e) {
+      return { success: false, message: (e as Error).message, report: null }
+    } finally {
+      isLoading.value = false
     }
-
-    const report: VolunteerImportReport = await res.json()
-
-    await fetchVolunteers()
-
-    const hasErrors   = report.total_errors > 0
-    const hasWarnings = report.total_warnings > 0
-    let message = `${report.total_persisted} bénévole(s) importé(s) avec succès`
-    if (hasErrors)   message += ` — ${report.total_errors} erreur(s)`
-    if (hasWarnings) message += ` — ${report.total_warnings} avertissement(s)`
-
-    return { success: true, message, report }
-
-  } catch (e) {
-    return { success: false, message: (e as Error).message, report: null }
-  } finally {
-    isLoading.value = false
   }
-}
-
 
   const processVolunteers = async (): Promise<{ success: boolean; message: string }> => {
     isLoading.value = true
@@ -205,6 +224,7 @@ const importFromExcel = async (file: File): Promise<{
   return {
     volunteers, volunteersTableData, isLoading, selectedVolunteer, stats,
     fetchVolunteers, selectVolunteer, getVolunteerById,
+    createVolunteer,
     deleteVolunteer, deleteAllVolunteers, updateEmail, updatePhone,
     addAvailability, removeSlot, addMate, removeMate,
     reorderPreferences,
